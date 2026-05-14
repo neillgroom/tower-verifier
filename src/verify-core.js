@@ -102,12 +102,27 @@ async function selfTest() {
 // receipt.hashes.hash_text.
 // =====================================================================
 
+// Sentinel that Tower stores in entries.text for sealed/tomb tiers — the
+// real plaintext lives client-side under the user's AES-256-GCM key and
+// never reaches the server. The verifier cannot re-compute hash_text from
+// this sentinel; it would always mismatch. Sealed/tomb receipts skip Step A
+// with a clear note instead of rendering RED. (Audit R2 finding —
+// CodeRabbit Critical-1.)
+const SEALED_SENTINEL = '[SEALED]';
+
 async function verifyTextHash(receipt) {
     if (typeof receipt?.entry?.text !== 'string') {
         return { status: 'fail', detail: 'receipt.entry.text missing or not a string' };
     }
     if (typeof receipt?.hashes?.hash_text !== 'string') {
         return { status: 'fail', detail: 'receipt.hashes.hash_text missing' };
+    }
+    const tier = receipt?.entry?.tier;
+    if (receipt.entry.text === SEALED_SENTINEL && (tier === 'sealed' || tier === 'tomb')) {
+        return {
+            status: 'skip',
+            detail: `entry is ${tier}-tier — plaintext lives client-side under your AES-256-GCM key, which The Tower never holds. Text-hash check requires plaintext; decrypt locally and re-verify if needed. Merkle proof + Bitcoin anchor still verify what was carved.`,
+        };
     }
     const expected = receipt.hashes.hash_text.toLowerCase();
     const got = await sha256Hex(receipt.entry.text);
@@ -212,12 +227,23 @@ class OtsReader {
         return out;
     }
     readVarint() {
+        // OpenTimestamps varint = LEB128. JS bitwise ops are signed-32, so
+        // `(b & 0x7f) << shift` overflows at shift >= 28 and produces wrong
+        // values for varints > 2^28. Using floating-point Math.pow gives us
+        // safe-integer precision up to 2^53, which exceeds any field length
+        // we'd realistically encounter in an OTS proof. (Audit R2 finding —
+        // Codex P1-9 + CodeRabbit Critical-3.)
         let value = 0;
         let shift = 0;
         for (let i = 0; i < 10; i++) {
             const b = this.readByte();
-            value |= (b & 0x7f) << shift;
-            if ((b & 0x80) === 0) return value >>> 0;
+            value += (b & 0x7f) * Math.pow(2, shift);
+            if ((b & 0x80) === 0) {
+                if (!Number.isSafeInteger(value)) {
+                    throw new Error('varint exceeds safe integer range');
+                }
+                return value;
+            }
             shift += 7;
         }
         throw new Error('varint too long');
@@ -368,7 +394,55 @@ async function parseOtsProof(otsBytes, initialHashHex) {
 // the bundled-header check.
 // =====================================================================
 
-async function verifyBitcoinHeader(receipt, otsBytes) {
+// Validate Bitcoin proof-of-work on a single 80-byte header.
+//
+// Bitcoin's consensus rule: SHA-256d(header) must be less than the target
+// derived from the header's `bits` field (bytes 72-75, LE uint32):
+//   exponent = bits[3]
+//   mantissa = bits[0] | (bits[1] << 8) | (bits[2] << 16)
+//   target = mantissa * 2^(8 * (exponent - 3))   (256-bit little-endian)
+// hash < target = valid PoW.
+//
+// This proves the bundled header was produced by real Bitcoin mining work
+// — forging it requires solving SHA-256 PoW at network difficulty, which
+// is computationally infeasible. It does NOT prove the block is in the
+// longest chain (that requires checkpoint validation or explorer lookup),
+// but it eliminates the cheapest forgery — synthesizing a header byte-
+// by-byte. (Audit R2 finding — Codex P0-1 + Gemini P0-1.)
+function validateHeaderPoW(headerBytes, blockHashLE) {
+    const bits = headerBytes.subarray(72, 76);
+    const exponent = bits[3];
+    const mantissa = bits[0] | (bits[1] << 8) | (bits[2] << 16);
+    if (exponent < 3 || exponent > 32) {
+        return { ok: false, reason: `invalid bits exponent ${exponent}` };
+    }
+    const targetBytes = new Uint8Array(32);
+    const off = exponent - 3;
+    if (off >= 32 || mantissa === 0) {
+        return { ok: false, reason: `degenerate bits 0x${bytesToHex(bits)}` };
+    }
+    targetBytes[off] = mantissa & 0xff;
+    if (off + 1 < 32) targetBytes[off + 1] = (mantissa >> 8) & 0xff;
+    if (off + 2 < 32) targetBytes[off + 2] = (mantissa >> 16) & 0xff;
+    // Compare LE blockHash < LE target by scanning MSB-first (highest index).
+    for (let i = 31; i >= 0; i--) {
+        if (blockHashLE[i] < targetBytes[i]) {
+            return {
+                ok: true,
+                difficulty: `0x${bytesToHex(bits)}`,
+            };
+        }
+        if (blockHashLE[i] > targetBytes[i]) {
+            return {
+                ok: false,
+                reason: `header hash exceeds difficulty target (PoW invalid)`,
+            };
+        }
+    }
+    return { ok: false, reason: 'header hash equals target (degenerate)' };
+}
+
+async function verifyBitcoinHeader(receipt, otsBytes, headerBytesFromZip) {
     const merkleRoot = receipt?.merkle?.merkle_root;
     if (typeof merkleRoot !== 'string' || !/^[0-9a-f]{64}$/i.test(merkleRoot)) {
         return { status: 'fail', detail: 'receipt.merkle.merkle_root missing or invalid' };
@@ -396,67 +470,112 @@ async function verifyBitcoinHeader(receipt, otsBytes) {
 
     // A single OTS proof can carry MULTIPLE Bitcoin attestations from
     // different calendars at slightly different blocks (e.g., batch #2
-    // attests 941015, 941022, and 941032 — all valid timestamps). The
-    // receipt's btc_block is the CANONICAL block (lowest, per anchor.js).
-    // To verify offline, we need the attestation whose blockHeight
-    // matches the bundled block header. Pick that one — not blindly the
-    // first.
+    // attests 941015, 941022, and 941032). The receipt's btc_block is the
+    // canonical block (lowest height, per anchor.js). We REQUIRE
+    // receipt.bitcoin.btc_block to be present and numeric when a bundled
+    // block header is provided — otherwise an attacker could omit btc_block
+    // to trigger silent fallback to a different attestation. (Audit R2
+    // finding — Gemini P1-3.)
     const expectedBlock = receipt?.bitcoin?.btc_block;
-    let chosen = null;
-    if (expectedBlock) {
-        chosen = btcAttestations.find((a) => String(a.blockHeight) === String(expectedBlock));
+    const headerHex = receipt?.bitcoin?.block_header_hex;
+    if (headerHex !== null && headerHex !== undefined && expectedBlock === null) {
+        return { status: 'fail', detail: 'receipt has block_header_hex but no btc_block — refusing to guess which attestation the header belongs to' };
     }
-    if (!chosen) {
-        // Fall back to lowest height — matches anchor.js convention.
+    let chosen = null;
+    if (expectedBlock !== null && expectedBlock !== undefined) {
+        const expectedNum = Number(expectedBlock);
+        if (!Number.isFinite(expectedNum) || expectedNum <= 0 || !Number.isInteger(expectedNum)) {
+            return { status: 'fail', detail: `receipt.bitcoin.btc_block is not a positive integer: ${expectedBlock}` };
+        }
+        chosen = btcAttestations.find((a) => a.blockHeight === expectedNum);
+        if (!chosen) {
+            return {
+                status: 'fail',
+                detail: `receipt claims block ${expectedBlock} but OTS proof has no attestation for that height (found: ${btcAttestations.map((a) => a.blockHeight).join(', ')})`,
+            };
+        }
+    } else {
         chosen = btcAttestations.reduce(
             (lo, a) => (lo === null || a.blockHeight < lo.blockHeight ? a : lo),
             null
         );
     }
-    const headerHex = receipt?.bitcoin?.block_header_hex;
+
     if (typeof headerHex !== 'string' || !/^[0-9a-f]{160}$/i.test(headerHex)) {
         return {
             status: 'amber',
-            detail: `OTS attests Bitcoin block ${chosen.blockHeight}, but receipt has no bundled block header to verify offline — fall back to a block explorer (handled by the fetch path)`,
+            detail: `OTS attests Bitcoin block ${chosen.blockHeight}, but receipt has no bundled block header to verify offline — confirm the block on a public explorer or use the CLI fallback in README`,
             attestations: btcAttestations,
         };
     }
+
     const header = hexToBytes(headerHex);
     if (header.length !== 80) {
         return { status: 'fail', detail: 'block header is not 80 bytes' };
     }
-    // Block hash = SHA-256d(header), then reverse for display.
+
+    // If the ZIP also bundled btc-block-header.bin as raw bytes, require
+    // byte-for-byte equivalence with the JSON-embedded hex. They're two
+    // representations of the same data; mismatch = tampering. (Audit R2
+    // finding — Codex P1-5.)
+    if (headerBytesFromZip && headerBytesFromZip.length > 0) {
+        if (headerBytesFromZip.length !== 80) {
+            return { status: 'fail', detail: 'btc-block-header.bin is not 80 bytes' };
+        }
+        if (!bytesEqual(header, headerBytesFromZip)) {
+            return { status: 'fail', detail: 'btc-block-header.bin disagrees with receipt.bitcoin.block_header_hex — receipt tampered with' };
+        }
+    }
+
+    // Block hash = SHA-256d(header). Stored little-endian internally;
+    // displayed big-endian on explorers.
     const hash1 = await sha256Bytes(header);
     const hash2 = await sha256Bytes(hash1);
     const blockHashLE = hash2;
     const blockHashBE = new Uint8Array(blockHashLE.length);
     for (let i = 0; i < blockHashLE.length; i++) blockHashBE[i] = blockHashLE[blockHashLE.length - 1 - i];
     const blockHashHex = bytesToHex(blockHashBE);
-    // merkle_root field is bytes 36..67 of the header, little-endian.
-    const headerMerkleRootLE = header.subarray(36, 68);
-    const headerMerkleRootBE = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) headerMerkleRootBE[i] = headerMerkleRootLE[31 - i];
-    const headerMerkleRootHexBE = bytesToHex(headerMerkleRootBE);
-    // The OTS attestation's "final hash" is what we walked the proof to
-    // produce — that should equal the Bitcoin block's merkle_root
-    // (typically displayed big-endian).
+
+    // STRICT byte-equal comparison. Both the OTS attestation's final hash
+    // AND the header's merkle_root field (bytes 36..67) are stored in the
+    // same internal byte order — the explorer-display form is a separate
+    // human-reading convention computed by REVERSING these bytes. The
+    // canonical check is direct byte equality, NOT a dual-orientation OR.
+    // Gemini's audit prescribed strict-BE; that's reversed from reality —
+    // strict comparison must be against as-stored bytes.
+    const headerMerkleRootAsStored = header.subarray(36, 68);
+    const headerMerkleRootHex = bytesToHex(headerMerkleRootAsStored);
     const otsFinalHashHex = bytesToHex(chosen.finalHash);
-    if (otsFinalHashHex !== headerMerkleRootHexBE && otsFinalHashHex !== bytesToHex(headerMerkleRootLE)) {
+    if (otsFinalHashHex !== headerMerkleRootHex) {
         return {
             status: 'fail',
-            detail: `OTS proof's final hash for block ${chosen.blockHeight} (${otsFinalHashHex.slice(0, 16)}…) does not match the block header's merkle_root (${headerMerkleRootHexBE.slice(0, 16)}…). All attestation heights found: ${btcAttestations.map((a) => a.blockHeight).join(', ')}.`,
+            detail: `OTS proof's final hash for block ${chosen.blockHeight} (${otsFinalHashHex.slice(0, 16)}…) does not match the block header's merkle_root field (${headerMerkleRootHex.slice(0, 16)}…). All attestation heights found: ${btcAttestations.map((a) => a.blockHeight).join(', ')}.`,
         };
     }
-    // Optionally cross-check the receipt's block_hash claim.
+
+    // Cross-check the receipt's block_hash claim if present.
     if (receipt?.bitcoin?.block_hash && receipt.bitcoin.block_hash.toLowerCase() !== blockHashHex) {
         return {
             status: 'fail',
             detail: `receipt claims block hash ${receipt.bitcoin.block_hash.slice(0, 16)}…, computed ${blockHashHex.slice(0, 16)}…`,
         };
     }
+
+    // Validate proof-of-work on the header itself. This eliminates the
+    // cheapest forgery (synthesizing a header byte-by-byte). Forging a
+    // valid-PoW header at Bitcoin's network difficulty is computationally
+    // infeasible. (Audit R2 finding — Codex P0-1 + Gemini P0-1.)
+    const powResult = validateHeaderPoW(header, blockHashLE);
+    if (!powResult.ok) {
+        return {
+            status: 'fail',
+            detail: `Bitcoin header fails proof-of-work validation: ${powResult.reason}. The bundled header was not produced by Bitcoin mining.`,
+        };
+    }
+
     return {
         status: 'pass',
-        detail: `anchored at Bitcoin block ${chosen.blockHeight} (${blockHashHex.slice(0, 16)}…) — verified offline against bundled 80-byte header (${btcAttestations.length} attestation${btcAttestations.length === 1 ? '' : 's'} in proof)`,
+        detail: `anchored at Bitcoin block ${chosen.blockHeight} (${blockHashHex.slice(0, 16)}…) — header passes PoW validation (bits ${powResult.difficulty}); merkle_root matches OTS attestation. ${btcAttestations.length} attestation${btcAttestations.length === 1 ? '' : 's'} in proof. CONFIRM block hash on a public explorer to fully validate chain membership.`,
         blockHeight: chosen.blockHeight,
         blockHashHex,
     };
@@ -467,7 +586,7 @@ async function verifyBitcoinHeader(receipt, otsBytes) {
 // Evaluation order per docs/step2-verifier-plan.md §4.6.
 // =====================================================================
 
-async function verifyReceiptArtifacts({ receipt, otsBytes }) {
+async function verifyReceiptArtifacts({ receipt, otsBytes, blockHeaderBytes }) {
     const steps = [];
     const log = (name, result) => steps.push({ name, ...result });
     // Step 0 — self-test.
@@ -505,7 +624,7 @@ async function verifyReceiptArtifacts({ receipt, otsBytes }) {
         };
     }
     // Step D — Bitcoin header + OTS walk.
-    const d = await verifyBitcoinHeader(receipt, otsBytes);
+    const d = await verifyBitcoinHeader(receipt, otsBytes, blockHeaderBytes);
     log('bitcoin-anchor', d);
     if (d.status === 'fail') {
         return { overall: 'red', summary: d.detail, steps };
@@ -534,7 +653,9 @@ const api = {
     verifyMerkleProof,
     parseOtsProof,
     verifyBitcoinHeader,
+    validateHeaderPoW,
     verifyReceiptArtifacts,
+    SEALED_SENTINEL,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 if (typeof window !== 'undefined') window.TowerVerifyCore = api;

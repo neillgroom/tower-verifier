@@ -39,7 +39,12 @@ async function testVector(zipPath, expected) {
         if (fs.existsSync(otsPath)) {
             otsBytes = new Uint8Array(fs.readFileSync(otsPath));
         }
-        const result = await core.verifyReceiptArtifacts({ receipt, otsBytes });
+        let blockHeaderBytes = null;
+        const headerPath = path.join(tmp, 'btc-block-header.bin');
+        if (fs.existsSync(headerPath)) {
+            blockHeaderBytes = new Uint8Array(fs.readFileSync(headerPath));
+        }
+        const result = await core.verifyReceiptArtifacts({ receipt, otsBytes, blockHeaderBytes });
         console.log(`  overall=${result.overall} summary="${result.summary}"`);
         for (const step of result.steps) {
             console.log(`    [${step.status}] ${step.name}: ${step.detail}`);

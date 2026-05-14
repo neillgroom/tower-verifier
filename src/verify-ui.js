@@ -129,22 +129,42 @@
         if (fileNames.length > MAX_ENTRIES) {
             throw new Error(`Too many files in ZIP (${fileNames.length}; max ${MAX_ENTRIES})`);
         }
+
+        // Pre-decompression size check via JSZip's internal entry metadata.
+        // We previously checked after `async()` decompressed the entry — too
+        // late to defend against a ZIP bomb (the inflated bytes already in
+        // memory). Now we read the uncompressed-size field from the local
+        // header before any decompression starts. (Audit R2 finding —
+        // Codex P1-6 + CodeRabbit Warning-1.) JSZip 3 exposes this on
+        // `_data.uncompressedSize`; we treat any absence defensively.
+        let totalUncompressed = 0;
+        for (const name of fileNames) {
+            const meta = zip.files[name]?._data;
+            const size = (meta && Number(meta.uncompressedSize)) || 0;
+            if (size > MAX_FILE_BYTES) {
+                throw new Error(`${name} declares ${size} bytes uncompressed (cap ${MAX_FILE_BYTES})`);
+            }
+            totalUncompressed += size;
+        }
+        if (totalUncompressed > MAX_ZIP_BYTES) {
+            throw new Error(`Total uncompressed size ${totalUncompressed} exceeds ${MAX_ZIP_BYTES}`);
+        }
+
         const result = {};
         for (const name of fileNames) {
             if (!SAFE_NAME.test(name)) continue;
             if (!ALLOWED_FILES.has(name)) continue;
             const entry = zip.files[name];
-            // Decompressed-size enforcement via async + check after.
             if (name === 'receipt.json' || name === 'README.txt' || name === 'ciphertext-meta.json') {
                 const text = await entry.async('string');
                 if (new Blob([text]).size > MAX_FILE_BYTES) {
-                    throw new Error(`${name} exceeds ${MAX_FILE_BYTES} bytes decompressed`);
+                    throw new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`);
                 }
                 result[name] = text;
             } else {
                 const bytes = await entry.async('uint8array');
                 if (bytes.length > MAX_FILE_BYTES) {
-                    throw new Error(`${name} exceeds ${MAX_FILE_BYTES} bytes decompressed`);
+                    throw new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`);
                 }
                 result[name] = bytes;
             }
@@ -161,7 +181,8 @@
             }
             const receipt = JSON.parse(contents['receipt.json']);
             const otsBytes = contents['merkle-root.ots'] || null;
-            const result = await core.verifyReceiptArtifacts({ receipt, otsBytes });
+            const blockHeaderBytes = contents['btc-block-header.bin'] || null;
+            const result = await core.verifyReceiptArtifacts({ receipt, otsBytes, blockHeaderBytes });
             renderResult(result, receipt);
         } catch (err) {
             console.error(err);
