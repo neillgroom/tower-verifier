@@ -65,18 +65,40 @@ async function main() {
     if (!ok) fail('self-test (SubtleCrypto sha256) did not match known vector');
     pass('self-test (SubtleCrypto sha256 known vector)');
 
-    const realZip = path.join(VECTOR_DIR, 'real-entry-3.zip');
-    if (fs.existsSync(realZip)) {
-        await testVector(realZip, 'green');
-    } else {
-        console.log(`  SKIP: ${realZip} not present`);
+    // Positive vectors — real Tower receipts that MUST verify GREEN.
+    const positives = [
+        ['real-entry-3.zip', 'Open-tier, fully anchored. All 5 steps pass.'],
+        ['sealed-entry-4.zip', 'Sealed-tier in same batch. Step A skips for the sentinel; Merkle + Bitcoin still verify.'],
+    ];
+    for (const [name, _desc] of positives) {
+        const p = path.join(VECTOR_DIR, name);
+        if (fs.existsSync(p)) await testVector(p, 'green');
+        else console.log(`  SKIP: ${p} not present`);
     }
 
-    const sealedZip = path.join(VECTOR_DIR, 'sealed-entry-4.zip');
-    if (fs.existsSync(sealedZip)) {
-        await testVector(sealedZip, 'green');
-    } else {
-        console.log(`  SKIP: ${sealedZip} not present`);
+    // Negative vectors (built by scripts/build-test-vectors.py) — must
+    // fail closed. Any path that lets one of these render GREEN is a
+    // false-positive bug.
+    const reds = [
+        ['tampered-hash.zip', 'hash_text mutated; Step A must catch.'],
+        ['tampered-merkle.zip', 'proof[0].hash zeroed; Step C must catch.'],
+    ];
+    for (const [name, _desc] of reds) {
+        const p = path.join(VECTOR_DIR, name);
+        if (fs.existsSync(p)) await testVector(p, 'red');
+        else console.log(`  SKIP: ${p} not present`);
+    }
+
+    // Amber vectors — legitimate but not yet anchored. Must NOT render
+    // GREEN (would be a "verified" claim with no Bitcoin block behind it)
+    // and must NOT render RED (carve was recorded, just not anchored yet).
+    const ambers = [
+        ['pre-batch.zip', 'merkle nulled; Step C must amber, no fall-through to green.'],
+    ];
+    for (const [name, _desc] of ambers) {
+        const p = path.join(VECTOR_DIR, name);
+        if (fs.existsSync(p)) await testVector(p, 'amber');
+        else console.log(`  SKIP: ${p} not present`);
     }
 }
 
