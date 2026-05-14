@@ -1,10 +1,12 @@
 // Test harness — runs verify-core.js against real receipt ZIPs.
 //
-// Usage: node test/run.js
+// Vectors:
+//   - real-entry-3.zip       : Open-tier, batch confirmed. Expects GREEN.
+//   - sealed-entry-4.zip     : Sealed-tier, batch confirmed. Step A skipped
+//                              for the sentinel; Merkle + Bitcoin still
+//                              verify. Expects GREEN.
 //
-// Uses Node's built-in unzip via execFileSync (no shell injection
-// surface — args are passed as an array). Test vectors live under
-// ../test-vectors/.
+// Uses Node's built-in unzip via execFileSync (no shell injection surface).
 
 const fs = require('fs');
 const path = require('path');
@@ -59,17 +61,22 @@ async function testVector(zipPath, expected) {
 }
 
 async function main() {
-    // Self-test: SubtleCrypto SHA-256 known answer.
     const ok = await core.selfTest();
     if (!ok) fail('self-test (SubtleCrypto sha256) did not match known vector');
     pass('self-test (SubtleCrypto sha256 known vector)');
 
-    // Real-world test: a confirmed Tower receipt ZIP.
     const realZip = path.join(VECTOR_DIR, 'real-entry-3.zip');
     if (fs.existsSync(realZip)) {
         await testVector(realZip, 'green');
     } else {
-        console.log(`  SKIP: ${realZip} not present (drop a real receipt here to test)`);
+        console.log(`  SKIP: ${realZip} not present`);
+    }
+
+    const sealedZip = path.join(VECTOR_DIR, 'sealed-entry-4.zip');
+    if (fs.existsSync(sealedZip)) {
+        await testVector(sealedZip, 'green');
+    } else {
+        console.log(`  SKIP: ${sealedZip} not present`);
     }
 }
 

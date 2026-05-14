@@ -117,11 +117,19 @@ async function verifyTextHash(receipt) {
     if (typeof receipt?.hashes?.hash_text !== 'string') {
         return { status: 'fail', detail: 'receipt.hashes.hash_text missing' };
     }
+    // Sealed/Tomb detection: prefer the explicit tier field (added in
+    // receipt v1.2.1). Fall back to sentinel-only detection for older
+    // receipts that didn't emit tier. Either signal triggers skip — the
+    // plaintext lives client-side under the user's key, so we cannot
+    // re-derive hash_text without decryption.
     const tier = receipt?.entry?.tier;
-    if (receipt.entry.text === SEALED_SENTINEL && (tier === 'sealed' || tier === 'tomb')) {
+    const tierSays = tier === 'sealed' || tier === 'tomb';
+    const sentinelSays = receipt.entry.text === SEALED_SENTINEL;
+    if (tierSays || sentinelSays) {
+        const label = tierSays ? tier : 'sealed/tomb';
         return {
             status: 'skip',
-            detail: `entry is ${tier}-tier — plaintext lives client-side under your AES-256-GCM key, which The Tower never holds. Text-hash check requires plaintext; decrypt locally and re-verify if needed. Merkle proof + Bitcoin anchor still verify what was carved.`,
+            detail: `entry is ${label}-tier — plaintext lives client-side under your AES-256-GCM key, which The Tower never holds. Text-hash check requires plaintext; decrypt locally and re-verify if needed. Merkle proof + Bitcoin anchor still verify what was carved.`,
         };
     }
     const expected = receipt.hashes.hash_text.toLowerCase();
