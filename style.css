@@ -1,0 +1,141 @@
+/* Tower Verifier — distinctive monolithic obsidian aesthetic. */
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    --bg: #0a0a0d;
+    --bg-card: #14141a;
+    --bg-card-edge: #1f1f28;
+    --fg: #e8e6df;
+    --fg-dim: #888888;
+    --gold: #d4af37;
+    --gold-bright: #f0c849;
+    --green: #3cd982;
+    --amber: #d4af37;
+    --red: #ff5555;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --mono: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+body {
+    background: radial-gradient(ellipse at top, #1a1a22 0%, var(--bg) 60%);
+    background-attachment: fixed;
+}
+
+.container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem;
+}
+
+header { text-align: center; margin-bottom: 2rem; }
+h1 {
+    font-family: var(--serif);
+    font-size: 2.5rem;
+    color: var(--gold);
+    margin: 0 0 0.5rem;
+    letter-spacing: 0.02em;
+}
+h2, h3, h4 { font-family: var(--serif); color: var(--gold); margin: 1.5rem 0 0.5rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.15rem; }
+h4 { font-size: 1rem; color: var(--gold-bright); letter-spacing: 0.05em; }
+
+p { margin: 0.5rem 0; }
+a { color: var(--gold); text-decoration: underline; }
+a:hover { color: var(--gold-bright); }
+code { font-family: var(--mono); background: var(--bg-card-edge); padding: 1px 6px; border-radius: 3px; font-size: 0.9em; }
+pre { background: var(--bg-card-edge); padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85rem; }
+
+.subtle { color: var(--fg-dim); }
+.small { font-size: 0.85rem; }
+
+.drop {
+    margin: 2rem 0;
+    padding: 3rem 1.5rem;
+    border: 2px dashed var(--bg-card-edge);
+    border-radius: 6px;
+    background: var(--bg-card);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+.drop:hover, .drop.dragover {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.04);
+}
+.drop p { margin: 0.25rem 0; }
+
+.result-card {
+    margin: 2rem 0;
+    padding: 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--bg-card-edge);
+    border-radius: 6px;
+}
+
+.traffic-light {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.dot {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--fg-dim);
+    transition: background 0.25s, box-shadow 0.25s;
+}
+.label {
+    font-family: var(--serif);
+    font-size: 1.3rem;
+    letter-spacing: 0.1em;
+    color: var(--fg-dim);
+}
+
+.summary { font-size: 1rem; margin-top: 0.5rem; }
+
+.steps { margin-top: 1.5rem; }
+.step {
+    display: grid;
+    grid-template-columns: 24px 140px 1fr;
+    gap: 0.5rem;
+    align-items: start;
+    padding: 0.35rem 0;
+    border-top: 1px solid var(--bg-card-edge);
+    font-size: 0.85rem;
+}
+.step:first-of-type { border-top: none; }
+.step-icon { font-weight: bold; font-size: 1rem; line-height: 1.4; }
+.step-name { color: var(--fg-dim); font-family: var(--mono); }
+.step-detail { color: var(--fg); word-break: break-word; }
+
+.entry-text { margin-top: 1.5rem; }
+
+.explainer { margin: 3rem 0 2rem; padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--bg-card-edge); border-radius: 6px; }
+.explainer ol { padding-left: 1.5rem; }
+.explainer li { margin: 0.4rem 0; }
+
+footer { margin-top: 3rem; text-align: center; }
+
+@media (max-width: 540px) {
+    h1 { font-size: 1.8rem; }
+    .step { grid-template-columns: 20px 1fr; }
+    .step-name { grid-column: 2; }
+    .step-detail { grid-column: 2; }
+}

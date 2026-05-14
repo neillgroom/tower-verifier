@@ -1,0 +1,12 @@
+# Preserve binary files exactly — SHA-256s in vendor-lock.json depend on
+# byte-perfect storage. Line-ending conversion on a min.js would change
+# its hash and break the vendor provenance check.
+
+vendor/jszip.min.js binary
+vendor/*.js binary
+test-vectors/*.zip binary
+test-vectors/*.ots binary
+test-vectors/*.bin binary
+
+# Force LF on shell scripts so they work on Linux CI.
+*.sh text eol=lf

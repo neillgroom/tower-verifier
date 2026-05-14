@@ -1,0 +1,23 @@
+{
+  "comment": "Vendor provenance lock. Anyone auditing this repo can re-fetch each vendored file at the exact URL below and confirm the SHA-256 matches. Run scripts/verify-vendor.sh to automate this check.",
+  "packages": [
+    {
+      "name": "jszip",
+      "version": "3.10.1",
+      "license": "MIT or GPL-3.0+ (dual)",
+      "purpose": "ZIP extraction in the browser. Tower's receipt artifact is a ZIP; we use JSZip to read it client-side. JSZip has no transitive dependencies and is a single self-contained file.",
+      "upstream_repo": "https://github.com/Stuk/jszip",
+      "upstream_tag": "v3.10.1",
+      "fetched_from": "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",
+      "file": "vendor/jszip.min.js",
+      "size_bytes": 97630,
+      "sha256": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e"
+    }
+  ],
+  "explicitly_not_vendored": [
+    {
+      "name": "javascript-opentimestamps",
+      "reason": "The npm package is CommonJS-only with deep Node.js stdlib usage (url, util, assert, request-promise, bitcore-lib). Bundling for browser requires polyfills and balloons the audit surface to ~250KB. We instead implement the OTS file format directly in src/verify-core.js — ~120 lines, fully auditable, zero supply-chain risk. The format is well-documented at https://github.com/opentimestamps/python-opentimestamps/blob/master/doc/file-format.md and the Bitcoin attestation path is small (append/prepend/sha256/fork ops + a single attestation tag)."
+    }
+  ]
+}

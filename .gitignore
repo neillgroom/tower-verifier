@@ -1,0 +1,7 @@
+.DS_Store
+Thumbs.db
+node_modules/
+*.tmp
+*.log
+test-vectors/.private-*
+test-vectors/.real-batch1.ots

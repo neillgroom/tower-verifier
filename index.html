@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower Verifier — independent proof checker</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; font-src 'self'">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>▲ Tower Verifier</h1>
+            <p class="subtle">Independent proof checker for The Tower. Works without The Tower being online.</p>
+            <p class="subtle small">You are on: <code id="selfUrl">file://</code> — confirm this matches the URL printed in your receipt's README before uploading anything.</p>
+        </header>
+
+        <div id="drop" class="drop">
+            <p>Drag your <code>tower-receipt-entry-N.zip</code> here</p>
+            <p class="subtle">or click to choose a file</p>
+            <input type="file" id="fileInput" accept=".zip,application/zip" style="display:none">
+        </div>
+
+        <div id="result" class="result-card">
+            <div class="traffic-light">
+                <span id="lightDot" class="dot"></span>
+                <span id="lightLabel" class="label">READY</span>
+            </div>
+            <p class="subtle">Drop a Tower receipt ZIP to verify it.</p>
+        </div>
+
+        <section class="explainer">
+            <h2>How this verifier works</h2>
+            <ol>
+                <li><strong>SHA-256</strong> the entry text — must match <code>receipt.hashes.hash_text</code>.</li>
+                <li><strong>Walk the Merkle proof</strong> from your hash up to the batch root, using Tower's locked hex-string concatenation convention.</li>
+                <li><strong>Parse the OpenTimestamps proof</strong> inline (no third-party library — the entire OTS format handler is in <code>src/verify-core.js</code>, ~120 lines).</li>
+                <li><strong>Verify the 80-byte Bitcoin block header</strong> bundled in the ZIP — <code>SHA-256d</code> to derive the block hash, check its merkle_root against what the OTS proof walked to.</li>
+            </ol>
+            <p>If all steps pass, the entry is anchored to a specific Bitcoin block. No block-explorer call is needed for confirmed entries — the math is self-contained.</p>
+            <h3>Want to verify offline with a CLI instead?</h3>
+            <p>The ZIP's <code>README.txt</code> contains step-by-step instructions for the standard <code>opentimestamps-client</code> CLI. That path works on any air-gapped machine with the OTS client installed.</p>
+            <h3>Sourcing</h3>
+            <p>This entire verifier is at <a href="https://github.com/neillgroom/tower-verifier" target="_blank" rel="noopener">github.com/neillgroom/tower-verifier</a> under the MIT license. Clone it and open <code>index.html</code> in any browser — no build step, no dependencies beyond the vendored JSZip (used for reading the ZIP itself). Vendor provenance is locked in <code>vendor/vendor-lock.json</code>.</p>
+        </section>
+
+        <footer>
+            <p class="subtle small">▲ Tower Verifier v0.1.0 · MIT · <a href="https://github.com/neillgroom/tower-verifier" target="_blank" rel="noopener">source</a></p>
+        </footer>
+    </div>
+
+    <script src="vendor/jszip.min.js"></script>
+    <script src="src/verify-core.js"></script>
+    <script src="src/verify-ui.js"></script>
+</body>
+</html>
