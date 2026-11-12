@@ -1,0 +1,650 @@
+[
+ {
+  "name": "real-entry-3",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "genuine": true,
+  "link1": "A-plain",
+  "link2": "B-hash",
+  "desc": "Genuine Open owner ZIP, phone identity, batch 2 at 941015"
+ },
+ {
+  "name": "sealed-entry-4",
+  "overall": "green",
+  "code": "G_HIDDEN",
+  "genuine": true,
+  "link2": "B-hash",
+  "desc": "Genuine Sealed owner ZIP: commitment anchored, content hidden"
+ },
+ {
+  "name": "captured-entry-2",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "Genuine public receipt entry 2 (open, phone_hash, batch 2) + batch 2 OTS from real-entry-3.zip",
+  "genuine": true
+ },
+ {
+  "name": "captured-entry-3",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "Genuine public receipt entry 3 (open, phone_hash, batch 2) + batch 2 OTS from real-entry-3.zip",
+  "genuine": true
+ },
+ {
+  "name": "captured-entry-4",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "Genuine public receipt entry 4 (sealed, identity withheld, batch 2) + batch 2 OTS from real-entry-3.zip",
+  "genuine": true
+ },
+ {
+  "name": "captured-entry-5",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "Genuine public receipt entry 5 (sealed, identity withheld, batch 2) + batch 2 OTS from real-entry-3.zip",
+  "genuine": true
+ },
+ {
+  "name": "captured-entry-58",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 58 (open, phone_hash, batch 7) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS",
+   "A_BINDING_UNRECORDED"
+  ]
+ },
+ {
+  "name": "captured-entry-59",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 59 (open, phone_hash, batch 7) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS",
+   "A_BINDING_UNRECORDED"
+  ]
+ },
+ {
+  "name": "captured-entry-62",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 62 (open, phone_hash, batch 9) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS"
+  ]
+ },
+ {
+  "name": "captured-entry-63",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 63 (open, phone_hash, batch 9) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS"
+  ]
+ },
+ {
+  "name": "captured-entry-64",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 64 (sealed, identity withheld, batch 10) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS",
+   "A_IDENTITY_WITHHELD"
+  ]
+ },
+ {
+  "name": "captured-entry-65",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 65 (open, user_id, batch 11) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS"
+  ]
+ },
+ {
+  "name": "tampered-hash",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "hash_text mutated; link 1 fails"
+ },
+ {
+  "name": "tampered-merkle",
+  "overall": "red",
+  "code": "R_MERKLE",
+  "desc": "proof[0].hash zeroed; link 3 fails"
+ },
+ {
+  "name": "pre-batch",
+  "overall": "amber",
+  "code": "A_NOT_BATCHED",
+  "desc": "not yet batched: amber, never green"
+ },
+ {
+  "name": "forged-text-swap",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "Swapped text + its own hash_text over a real anchored hash_bound"
+ },
+ {
+  "name": "forged-sealed-visible-text",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "Claims tier sealed while showing other text (hash_text kept): old code skipped link 1"
+ },
+ {
+  "name": "forged-sealed-visible-text-rehashed",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "Claims tier sealed, shows other text with recomputed hash_text"
+ },
+ {
+  "name": "forged-marker-tomb-plain-text",
+  "overall": "red",
+  "code": "R_TIER_MARKER",
+  "desc": "tier tomb with text 'hello'"
+ },
+ {
+  "name": "forged-marker-treasure-plain-text",
+  "overall": "red",
+  "code": "R_TIER_MARKER",
+  "desc": "tier treasure with text 'hello'"
+ },
+ {
+  "name": "forged-marker-open-shows-sealed",
+  "overall": "red",
+  "code": "R_TIER_MARKER",
+  "desc": "tier open with text '[SEALED]'"
+ },
+ {
+  "name": "forged-marker-open-shows-treasure",
+  "overall": "red",
+  "code": "R_TIER_MARKER",
+  "desc": "tier open with text '[TREASURE]'"
+ },
+ {
+  "name": "forged-marker-sealed-shows-treasure",
+  "overall": "red",
+  "code": "R_TIER_MARKER",
+  "desc": "tier sealed with text '[TREASURE]'"
+ },
+ {
+  "name": "forged-marker-tomb-shows-treasure",
+  "overall": "red",
+  "code": "R_TIER_MARKER",
+  "desc": "tier tomb with text '[TREASURE]'"
+ },
+ {
+  "name": "forged-pipe-shift-identity",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "Earlier date in created_at, real timestamp|phone pushed into identity"
+ },
+ {
+  "name": "forged-pipe-shift-timestamp",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "Earlier date with the real one appended after a pipe in created_at"
+ },
+ {
+  "name": "forged-malformed-ts-no-millis",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: ts-no-millis"
+ },
+ {
+  "name": "forged-malformed-ts-offset",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: ts-offset"
+ },
+ {
+  "name": "forged-malformed-ts-impossible-date",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: ts-impossible-date"
+ },
+ {
+  "name": "forged-malformed-identity-upper",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: identity-upper"
+ },
+ {
+  "name": "forged-malformed-identity-short",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: identity-short"
+ },
+ {
+  "name": "forged-malformed-identity-leading-zero",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: identity-leading-zero"
+ },
+ {
+  "name": "forged-malformed-identity-field-mismatch",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: identity-field-mismatch"
+ },
+ {
+  "name": "forged-malformed-hash-text-upper",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: hash-text-upper"
+ },
+ {
+  "name": "forged-malformed-hash-bound-short",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: hash-bound-short"
+ },
+ {
+  "name": "forged-malformed-hash-text-missing-open",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: hash-text-missing-open"
+ },
+ {
+  "name": "forged-malformed-text-nul",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: text-nul"
+ },
+ {
+  "name": "forged-malformed-tier-unknown",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: tier-unknown"
+ },
+ {
+  "name": "forged-malformed-btc-block-not-int",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "malformed field: btc-block-not-int"
+ },
+ {
+  "name": "forged-version",
+  "overall": "red",
+  "code": "R_VERSION",
+  "desc": "unknown receipt version"
+ },
+ {
+  "name": "forged-hash-as-text-rehashed",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "text := original hash_text, hash_text recomputed"
+ },
+ {
+  "name": "forged-hash-as-text-unchanged",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "text := original hash_text, hash_text left unchanged"
+ },
+ {
+  "name": "forged-leaf-equals-hash-text",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "hash_bound := hash_text on a legacy Open receipt"
+ },
+ {
+  "name": "forged-rule-b-text",
+  "overall": "red",
+  "code": "R_UNKNOWN_RULE",
+  "desc": "legacy receipt states B-text"
+ },
+ {
+  "name": "forged-legacy-states-b-v3",
+  "overall": "red",
+  "code": "R_UNKNOWN_RULE",
+  "desc": "protocol 1 receipt states B-v3"
+ },
+ {
+  "name": "legacy-states-b-hash",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "legacy receipt stating its rules explicitly (what c3 buildReceipt will emit)",
+  "link1": "A-plain",
+  "link2": "B-hash"
+ },
+ {
+  "name": "forged-legacy-salt",
+  "overall": "red",
+  "code": "R_RULE_TIER",
+  "desc": "commit_salt on a legacy A-plain receipt"
+ },
+ {
+  "name": "forged-b-hash-relabelled-v3",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "genuine B-hash leaf presented as a v3 receipt"
+ },
+ {
+  "name": "real3-no-ots",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "genuine receipt without its OTS file"
+ },
+ {
+  "name": "real3-no-header",
+  "overall": "amber",
+  "code": "A_NO_HEADER",
+  "desc": "genuine receipt without a bundled header"
+ },
+ {
+  "name": "real3-ots-pending",
+  "overall": "amber",
+  "code": "A_OTS_PENDING",
+  "desc": "OTS with only a pending calendar attestation"
+ },
+ {
+  "name": "forged-btc-block-not-attested",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "btc_block names a height the OTS does not attest"
+ },
+ {
+  "name": "forged-ots-long-appends",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "200k one-byte appends; rejected without quadratic copying",
+  "maxMs": 2000
+ },
+ {
+  "name": "forged-ots-op-flood",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "200k sha256 ops; op cap rejects quickly",
+  "maxMs": 2000
+ },
+ {
+  "name": "forged-header-easy-bits",
+  "overall": "red",
+  "code": "R_HEADER_WORK",
+  "desc": "real header with self-declared bits 0x207fffff, nonce mined in milliseconds"
+ },
+ {
+  "name": "forged-header-block-1",
+  "overall": "red",
+  "code": "R_HEADER_HEIGHT",
+  "desc": "real early-chain header (block 1, bits 0x1d00ffff) claimed at height 1"
+ },
+ {
+  "name": "forged-header-genesis-work-at-min-height",
+  "overall": "red",
+  "code": "R_HEADER_WORK",
+  "desc": "claims the pinned minimum height and a post-launch timestamp, carries bits 0x1d00ffff"
+ },
+ {
+  "name": "forged-header-before-launch",
+  "overall": "red",
+  "code": "R_HEADER_TIME",
+  "desc": "header dated 2023, before the pinned minimum"
+ },
+ {
+  "name": "forged-claimed-height-below-min",
+  "overall": "red",
+  "code": "R_HEADER_HEIGHT",
+  "desc": "btc_block below the pinned minimum height"
+ },
+ {
+  "name": "forged-header-bad-nonce",
+  "overall": "red",
+  "code": "R_HEADER_POW",
+  "desc": "real header with nonce+1: hash above its own target"
+ },
+ {
+  "name": "forged-block-hash-claim",
+  "overall": "red",
+  "code": "R_HEADER",
+  "desc": "block_hash claim disagrees with the header"
+ },
+ {
+  "name": "v3-open",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "v3 Open, A-plain + B-v3",
+  "testPolicy": true,
+  "link1": "A-plain",
+  "link2": "B-v3"
+ },
+ {
+  "name": "v3-sealed-hidden",
+  "overall": "green",
+  "code": "G_HIDDEN",
+  "desc": "v3 Sealed unrevealed, owner receipt: commitment anchored, content hidden",
+  "testPolicy": true,
+  "link2": "B-v3"
+ },
+ {
+  "name": "v3-sealed-owner",
+  "overall": "green",
+  "code": "G_OWNER_CONTENT",
+  "desc": "v3 Sealed unrevealed + owner-supplied plaintext and salt",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal.",
+   "salt": "66c737db5f67fdd09273a03a6dc911d85d262ad87974037fef1d4832d4f47f54"
+  },
+  "testPolicy": true,
+  "link1": "A-salted",
+  "link2": "B-v3"
+ },
+ {
+  "name": "v3-sealed-owner-wrong-salt",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "owner-supplied salt is wrong",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal.",
+   "salt": "45f74f4d2384d1fef73047978da262d58d119cd6a30a37290ddf76f5bd737c66"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-owner-no-salt",
+  "overall": "red",
+  "code": "R_SALT_MISSING",
+  "desc": "owner supplies plaintext but no salt for an A-salted entry",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal."
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-owner-short-salt",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "owner-supplied salt is 63 hex characters",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal.",
+   "salt": "66c737db5f67fdd09273a03a6dc911d85d262ad87974037fef1d4832d4f47f5"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-revealed",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "v3 Sealed revealed, salt carried in the receipt",
+  "testPolicy": true,
+  "link1": "A-salted",
+  "link2": "B-v3"
+ },
+ {
+  "name": "v3-sealed-revealed-no-salt",
+  "overall": "red",
+  "code": "R_SALT_MISSING",
+  "desc": "revealed salted receipt carries no salt",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-revealed-salt-short",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "commit_salt of the wrong width",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-revealed-salt-shift",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "salt-boundary shift between salt and text",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-tomb-hidden",
+  "overall": "green",
+  "code": "G_HIDDEN",
+  "desc": "v3 Time Capsule, owner receipt",
+  "testPolicy": true,
+  "link2": "B-v3"
+ },
+ {
+  "name": "v3-treasure-envelope",
+  "overall": "green",
+  "code": "G_ENVELOPE",
+  "desc": "v3 Treasure with envelope.json",
+  "testPolicy": true,
+  "link1": "A-envelope",
+  "link2": "B-v3"
+ },
+ {
+  "name": "v3-treasure-wrong-envelope",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "envelope.json is not the anchored envelope",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-treasure-no-envelope",
+  "overall": "amber",
+  "code": "A_TREASURE_NO_ENVELOPE",
+  "desc": "Treasure ZIP without envelope.json",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-public",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "public v3 Sealed receipt: identity and hash_text withheld",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-open-states-salted",
+  "overall": "red",
+  "code": "R_RULE_TIER",
+  "desc": "v3 Open stating A-salted",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-sealed-states-plain",
+  "overall": "red",
+  "code": "R_RULE_TIER",
+  "desc": "v3 Sealed stating A-plain",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-treasure-states-plain",
+  "overall": "red",
+  "code": "R_RULE_TIER",
+  "desc": "v3 Treasure stating A-plain",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-missing-content-rule",
+  "overall": "red",
+  "code": "R_UNKNOWN_RULE",
+  "desc": "v3 receipt without content_rule",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-states-b-hash",
+  "overall": "red",
+  "code": "R_UNKNOWN_RULE",
+  "desc": "protocol 3 receipt stating B-hash",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-v3-presented-as-legacy",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "B-v3 leaf with its rule statements stripped is judged by B-hash and fails",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-v3-tier-swap",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "v3 Open leaf relabelled sealed with a salt: link 1 fails before link 2",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-text-bound-leaf",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "anchored leaf = sha256(text|ts|id); no accepted rule explains it",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-text-bound-leaf-unanchored",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "legacy text-bound leaf with no OTS: link 2 red is not masked by the missing-OTS amber"
+ },
+ {
+  "name": "legacy-treasure",
+  "overall": "red",
+  "code": "R_RULE_TIER",
+  "desc": "pre-c3 Treasure (leaf == hash_text): Treasure exists only under protocol 3",
+  "testPolicy": true
+ },
+ {
+  "name": "legacy-sealed-owner",
+  "overall": "green",
+  "code": "G_OWNER_CONTENT",
+  "desc": "legacy Sealed + owner plaintext (A-plain)",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal."
+  },
+  "testPolicy": true,
+  "link1": "A-plain",
+  "link2": "B-hash"
+ },
+ {
+  "name": "legacy-sealed-owner-wrong",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "legacy Sealed + wrong owner plaintext",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal.!"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "legacy-tomb-hidden",
+  "overall": "green",
+  "code": "G_HIDDEN",
+  "desc": "legacy Time Capsule shape (user id, [SEALED]); stands in for the uncaptured production capsule",
+  "testPolicy": true
+ },
+ {
+  "name": "pinned-58-anchored",
+  "overall": "amber",
+  "code": "A_BINDING_UNRECORDED",
+  "desc": "entry 58 (pinned exception) under a synthetic anchor: amber, never green",
+  "testPolicy": true
+ },
+ {
+  "name": "pinned-58-text-swap",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "pinned exception still checks link 1",
+  "testPolicy": true
+ }
+]
