@@ -29,15 +29,32 @@
             <p class="subtle">Drop a Tower receipt ZIP to verify it.</p>
         </div>
 
+        <section id="ownerBox" class="owner-box" hidden>
+            <h3>Owner check (sealed and Time Capsule entries)</h3>
+            <p class="subtle small">If this is your entry, check that your plaintext is the content anchored. Nothing you type or load here leaves this page: the page is not allowed to make network requests.</p>
+            <label for="ownerPlaintext">Plaintext</label>
+            <textarea id="ownerPlaintext" rows="4" autocomplete="off" spellcheck="false"></textarea>
+            <label for="ownerSalt">Salt (64 hex characters; only for entries carved under protocol 3)</label>
+            <input id="ownerSalt" type="text" autocomplete="off" spellcheck="false">
+            <label for="ownerKey">Or load your <code>tower-sealed-key-v1</code> key file (its salt is used, and its key opens <code>ciphertext.bin</code> if the ZIP carries it)</label>
+            <input id="ownerKey" type="file" accept=".key,.json,application/json">
+            <p><button id="ownerCheck" type="button">Check my content</button> <span id="ownerNote" class="subtle small"></span></p>
+        </section>
+
         <section class="explainer">
             <h2>How this verifier works</h2>
+            <p><strong>Green means every piece of content the receipt shows is tied, link by link, to a Bitcoin block header that carries real work.</strong> The links:</p>
             <ol>
-                <li><strong>SHA-256</strong> the entry text — must match <code>receipt.hashes.hash_text</code>.</li>
-                <li><strong>Walk the Merkle proof</strong> from your hash up to the batch root, using Tower's locked hex-string concatenation convention.</li>
-                <li><strong>Parse the OpenTimestamps proof</strong> inline (no third-party library — the entire OTS format handler is in <code>src/verify-core.js</code>, ~120 lines).</li>
-                <li><strong>Verify the 80-byte Bitcoin block header</strong> bundled in the ZIP — <code>SHA-256d</code> to derive the block hash, check its merkle_root against what the OTS proof walked to.</li>
+                <li><strong>Content to commitment.</strong> The text shown (or the Treasure <code>envelope.json</code>, or the plaintext the owner supplies) hashes to <code>hash_text</code>.</li>
+                <li><strong>Commitment to leaf.</strong> <code>hash_text</code>, the carve timestamp and the carver's identity hash to <code>hash_bound</code>. Only two formats are accepted (<code>B-hash</code> for older carves, <code>B-v3</code> for new ones); see <code>docs/formats.md</code>.</li>
+                <li><strong>Leaf to root.</strong> The Merkle path from <code>hash_bound</code> reaches the batch root.</li>
+                <li><strong>Root to header.</strong> The OpenTimestamps proof, parsed inline, ends at the Merkle root inside the bundled 80-byte Bitcoin block header.</li>
+                <li><strong>The header is real.</strong> Its proof of work is checked against pinned floors that the receipt cannot choose: a minimum block height, an absolute difficulty ceiling and a minimum date taken from the real blocks The Tower has anchored.</li>
             </ol>
-            <p>If all steps pass, the entry is anchored to a specific Bitcoin block. No block-explorer call is needed for confirmed entries — the math is self-contained.</p>
+            <p><strong>Amber</strong> means the anchor checks out but something shown or implied is not proven (for example: not yet anchored, no timestamp proof bundled, identity withheld on a public receipt, a Treasure envelope not supplied). <strong>Red</strong> means a claim in the receipt is false or malformed. A field that is checked and fails is always red, even when something else is also missing.</p>
+            <p>The proven date is the Bitcoin block's own timestamp. The carve time written in the receipt is shown only as "stated by the receipt", and only when it is bound into the leaf.</p>
+            <h3>What green does not prove</h3>
+            <p>Offline, the verifier proves the header carries real launch-era Bitcoin work. It cannot prove the block is in the main chain; use the explorer link on a green result for that one-click check. Forging a header that passes would need mining a block at real Bitcoin difficulty.</p>
             <h3>Want to verify offline with a CLI instead?</h3>
             <p>The ZIP's <code>README.txt</code> contains step-by-step instructions for the standard <code>opentimestamps-client</code> CLI. That path works on any air-gapped machine with the OTS client installed.</p>
             <h3>Sourcing</h3>
@@ -45,7 +62,7 @@
         </section>
 
         <footer>
-            <p class="subtle small">▲ Tower Verifier v0.1.0 · MIT · <a href="https://github.com/neillgroom/tower-verifier" target="_blank" rel="noopener">source</a></p>
+            <p class="subtle small">▲ Tower Verifier v0.2.0 · MIT · <a href="https://github.com/neillgroom/tower-verifier" target="_blank" rel="noopener">source</a></p>
         </footer>
     </div>
 

@@ -139,3 +139,15 @@ footer { margin-top: 3rem; text-align: center; }
     .step-name { grid-column: 2; }
     .step-detail { grid-column: 2; }
 }
+
+.facts { margin-top: 1rem; font-size: 0.9rem; }
+.fact { margin: 0.2rem 0; }
+.fact-label { color: var(--fg-dim); }
+.fact-value { font-family: var(--mono); word-break: break-word; }
+.entry-text.unproven h4 { color: #d4af37; }
+
+.owner-box { margin-top: 1.5rem; padding: 1.25rem; background: var(--bg-card); border: 1px solid var(--bg-card-edge); border-radius: 6px; }
+.owner-box[hidden] { display: none; }
+.owner-box label { display: block; margin-top: 0.75rem; font-size: 0.85rem; color: var(--fg-dim); }
+.owner-box textarea, .owner-box input[type="text"] { width: 100%; box-sizing: border-box; font-family: var(--mono); background: var(--bg); color: var(--fg); border: 1px solid var(--bg-card-edge); border-radius: 4px; padding: 0.4rem; }
+.owner-box button { margin-top: 0.75rem; }
