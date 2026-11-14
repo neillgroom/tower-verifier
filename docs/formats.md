@@ -38,7 +38,11 @@ malformed.
 | `bitcoin.block_header_hex` | exactly 160 characters `[0-9a-f]` (80 bytes) |
 
 A **withheld identity** (`identity.redacted === true` and no
-`binding_identity`) is allowed; it is not malformed. A **withheld
+`binding_identity`) is allowed; it is not malformed. Since The Tower's PR 45
+every PUBLIC receipt, Open included, withholds the identity, so link 2 cannot
+be checked on it: the result is at best AMBER `A_IDENTITY_WITHHELD`. Link 1
+(when `text` and `hash_text` are present) and links 3 to 5 are still checked,
+and a failure there is red. A **withheld
 `hash_text`** (absent or `null`) is allowed only when the identity is also
 withheld and the tier is `sealed`, `tomb` or `treasure`.
 
@@ -166,7 +170,9 @@ not yet batched (amber).
   (OpenTimestamps' own cap), an append/prepend argument may not exceed 4096
   bytes, at most 10000 operations and 256 nested forks per file. Violations
   are red (`R_OTS`) and are detected without hashing the oversized message.
-- `bitcoin.btc_block` must equal one of the Bitcoin attestation heights.
+- `bitcoin.btc_block` must equal one of the Bitcoin attestation heights. A
+  receipt that states `btc_block` while its OTS proof carries only pending
+  attestations is red (`R_OTS`), not amber: the claim is false.
 - The header is real when, in this order:
   1. the claimed height (`btc_block`, else the lowest attested height) is at
      least `MIN_ANCHOR_HEIGHT = 940842` (`R_HEADER_HEIGHT`);
@@ -196,6 +202,12 @@ Bitcoin difficulty (at today's difficulty, roughly the cost of one block).
 
 Every result carries `overall` (`green` | `amber` | `red`), a stable `code`,
 `link1Rule` and `link2Rule` (a rule id, or `"not evaluated"`), and `steps`.
-Amber results also list every amber reason in `ambers`. The full list is
+Amber results also list every amber reason in `ambers`. Every result also
+carries `label`, the traffic-light text: `VERIFIED` for the content-bearing
+greens (`G_CONTENT`, `G_OWNER_CONTENT`, `G_ENVELOPE`), `COMMITMENT ANCHORED —
+CONTENT HIDDEN` for `G_HIDDEN`, `NOT FULLY PROVEN` for amber, `FAILED` for red.
+A green result carries `blockHeight`, `blockHashHex` and `blockTime` (the
+header's own timestamp, the only proven date); `statedCreatedAt` (the receipt's
+`created_at`) is present only when link 2 held. The full list is
 `OUTCOME_CODES` in `src/verify-core.js`; `test/run.js` fails if any code has no
 vector.

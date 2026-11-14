@@ -21,14 +21,24 @@
   "overall": "green",
   "code": "G_CONTENT",
   "desc": "Genuine public receipt entry 2 (open, phone_hash, batch 2) + batch 2 OTS from real-entry-3.zip",
-  "genuine": true
+  "genuine": true,
+  "link1": "A-plain"
+ },
+ {
+  "name": "captured-entry-3-withheld",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "Genuine public receipt entry 3 (open, identity withheld, batch 2) + batch 2 OTS from real-entry-3.zip",
+  "genuine": true,
+  "link1": "A-plain"
  },
  {
   "name": "captured-entry-3",
   "overall": "green",
   "code": "G_CONTENT",
   "desc": "Genuine public receipt entry 3 (open, phone_hash, batch 2) + batch 2 OTS from real-entry-3.zip",
-  "genuine": true
+  "genuine": true,
+  "link1": "A-plain"
  },
  {
   "name": "captured-entry-4",
@@ -53,7 +63,8 @@
   "ambersInclude": [
    "A_NO_OTS",
    "A_BINDING_UNRECORDED"
-  ]
+  ],
+  "link1": "A-plain"
  },
  {
   "name": "captured-entry-59",
@@ -64,7 +75,8 @@
   "ambersInclude": [
    "A_NO_OTS",
    "A_BINDING_UNRECORDED"
-  ]
+  ],
+  "link1": "A-plain"
  },
  {
   "name": "captured-entry-62",
@@ -74,7 +86,8 @@
   "genuine": true,
   "ambersInclude": [
    "A_NO_OTS"
-  ]
+  ],
+  "link1": "A-plain"
  },
  {
   "name": "captured-entry-63",
@@ -84,7 +97,8 @@
   "genuine": true,
   "ambersInclude": [
    "A_NO_OTS"
-  ]
+  ],
+  "link1": "A-plain"
  },
  {
   "name": "captured-entry-64",
@@ -98,6 +112,18 @@
   ]
  },
  {
+  "name": "captured-entry-65-withheld",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 65 (open, identity withheld, batch 11) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS",
+   "A_IDENTITY_WITHHELD"
+  ],
+  "link1": "A-plain"
+ },
+ {
   "name": "captured-entry-65",
   "overall": "amber",
   "code": "A_NO_OTS",
@@ -105,7 +131,31 @@
   "genuine": true,
   "ambersInclude": [
    "A_NO_OTS"
+  ],
+  "link1": "A-plain"
+ },
+ {
+  "name": "captured-entry-66",
+  "overall": "amber",
+  "code": "A_NO_OTS",
+  "desc": "Genuine public receipt entry 66 (tomb, identity withheld, batch 12) (public JSON carries no OTS)",
+  "genuine": true,
+  "ambersInclude": [
+   "A_NO_OTS",
+   "A_IDENTITY_WITHHELD"
   ]
+ },
+ {
+  "name": "forged-withheld-open-text-swap",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "public Open receipt, identity withheld, text swapped: link 1 is still checked"
+ },
+ {
+  "name": "forged-withheld-open-merkle",
+  "overall": "red",
+  "code": "R_MERKLE",
+  "desc": "public Open receipt, identity withheld, Merkle path tampered: links 3-5 are still checked"
  },
  {
   "name": "tampered-hash",
@@ -342,6 +392,12 @@
   "overall": "amber",
   "code": "A_OTS_PENDING",
   "desc": "OTS with only a pending calendar attestation"
+ },
+ {
+  "name": "forged-btc-block-pending-ots",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "receipt claims btc_block 941015 but its OTS proof is pending only: the amber cannot mask the false claim"
  },
  {
   "name": "forged-btc-block-not-attested",

@@ -120,6 +120,11 @@ async function main() {
     for (const row of manifest) {
         const result = await runVector(row);
         seenCodes.add(row.code);
+        check(result.label === core.outcomeLabel(result.code), `${row.name}: result.label is the label for ${result.code}`);
+        if (result.code === 'G_HIDDEN') {
+            check(!/verified/i.test(result.label) && !/^verified/i.test(result.summary),
+                `${row.name}: hidden-commitment green is never labelled plain "VERIFIED" (label "${result.label}")`);
+        }
         if (row.genuine) {
             check(result.overall !== 'red', `genuine ${row.name} is not red`);
         }
@@ -166,6 +171,14 @@ async function main() {
     }
     check(st.overall === 'red' && st.code === 'R_SELFTEST', `broken SubtleCrypto -> red/R_SELFTEST (got ${st.overall}/${st.code})`);
     seenCodes.add('R_SELFTEST');
+
+    // Labels: every code has one; only the content-bearing greens say VERIFIED.
+    for (const [code, colour] of Object.entries(core.OUTCOME_CODES)) {
+        const label = core.outcomeLabel(code);
+        check(typeof label === 'string' && label !== 'UNKNOWN', `outcome code ${code} has a traffic-light label`);
+        check((label === 'VERIFIED') === (colour === 'green' && code !== 'G_HIDDEN'),
+            `outcome code ${code} is labelled VERIFIED only if it is a content-bearing green (label "${label}")`);
+    }
 
     // Completeness: every outcome code the verifier can return has a vector.
     const codes = core.OUTCOME_CODES ? Object.keys(core.OUTCOME_CODES) : [];

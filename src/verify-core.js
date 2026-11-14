@@ -148,6 +148,19 @@ const OUTCOME_CODES = Object.freeze({
     R_HEADER_POW: 'red',
 });
 
+// The traffic-light label for each colour. The hidden-commitment green has
+// its own label and is never shown as plain "VERIFIED": it claims no content.
+const OUTCOME_LABELS = Object.freeze({
+    G_HIDDEN: 'COMMITMENT ANCHORED — CONTENT HIDDEN',
+    green: 'VERIFIED',
+    amber: 'NOT FULLY PROVEN',
+    red: 'FAILED',
+});
+function outcomeLabel(code) {
+    if (Object.prototype.hasOwnProperty.call(OUTCOME_LABELS, code)) return OUTCOME_LABELS[code];
+    return OUTCOME_LABELS[OUTCOME_CODES[code]] || 'UNKNOWN';
+}
+
 // When several things are missing, the result's code is the first of these
 // that applies; result.ambers lists all of them.
 const AMBER_PRIORITY = [
@@ -703,7 +716,7 @@ async function checkHeaderIsReal(header, claimedHeight, policy = PINNED_HEADER_P
 
 const SUMMARIES = {
     G_CONTENT: 'Verified — the content shown was anchored in a Bitcoin block.',
-    G_HIDDEN: 'Verified — commitment anchored, content hidden. A hidden carve by this identity was anchored in a Bitcoin block; no content is shown, so none is claimed.',
+    G_HIDDEN: 'Commitment anchored, content hidden. A hidden carve by this identity was anchored in a Bitcoin block; no content is shown, so none is claimed.',
     G_OWNER_CONTENT: 'Verified — the content you supplied is the content anchored in a Bitcoin block.',
     G_ENVELOPE: 'Verified — this Treasure envelope was anchored in a Bitcoin block.',
     A_NOT_BATCHED: 'Not yet anchored — the entry is not in a batch yet. Re-download after the next batch confirms.',
@@ -725,6 +738,7 @@ async function verifyReceiptArtifacts(input, options) {
     const finish = (code, summary, extra = {}) => ({
         overall: OUTCOME_CODES[code],
         code,
+        label: outcomeLabel(code),
         summary: (testPolicy ? '[TEST HEADER POLICY] ' : '') + summary,
         link1Rule: state.link1Rule,
         link2Rule: state.link2Rule,
@@ -885,6 +899,9 @@ async function verifyReceiptArtifacts(input, options) {
                 if (!attestations.some((a) => a.type === 'pending')) {
                     return red('R_OTS', 'link-4 ots', 'OTS proof has no Bitcoin or pending attestation');
                 }
+                if (r.btcBlock !== null) {
+                    return red('R_OTS', 'link-4 ots', `receipt claims block ${r.btcBlock} but the OTS proof has no Bitcoin attestation (pending only)`);
+                }
                 ambers.push('A_OTS_PENDING');
                 log('link-4 ots', 'amber', 'only pending calendar attestations; no Bitcoin confirmation yet');
                 if (!header) ambers.push('A_NO_HEADER');
@@ -943,6 +960,7 @@ const api = {
     LEGACY_RECEIPT_VERSION,
     V3_RECEIPT_VERSION,
     OUTCOME_CODES,
+    outcomeLabel,
     MIN_ANCHOR_HEIGHT,
     MAX_TARGET,
     MIN_HEADER_TIME,

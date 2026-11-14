@@ -260,6 +260,7 @@ for path in sorted(CAPTURED.glob('entry-*.json'), key=lambda p: int(p.stem.split
     pinned = r['hashes']['hash_bound'] in (
         '50593140802f2c4d2652c0fa34220b21b167039caf6777b4096ac78a908150d5',
         '6313be4d0d3958910e557005fb4df7228c7ee0e1682523641a69b098adbf88d8')
+    shows_text = r['entry'].get('text') not in ('[SEALED]', '[TREASURE]') and bool(r['hashes'].get('hash_text'))
     if batch2 and not redacted:
         exp = ('green', 'G_CONTENT', None)
     elif batch2 and redacted:
@@ -271,11 +272,35 @@ for path in sorted(CAPTURED.glob('entry-*.json'), key=lambda p: int(p.stem.split
         if pinned:
             inc.append('A_BINDING_UNRECORDED')
         exp = ('amber', 'A_NO_OTS', inc)
-    add(f'captured-entry-{eid}', files, exp[0], exp[1],
+    add(f'captured-{path.stem}', files, exp[0], exp[1],
         f"Genuine public receipt entry {eid} ({r['entry'].get('tier')}, "
         f"{'identity withheld' if redacted else (r['identity'].get('binding_field'))}, batch {r['merkle']['batch_id']})"
         + (' + batch 2 OTS from real-entry-3.zip' if batch2 else ' (public JSON carries no OTS)'),
-        genuine=True, ambers_include=exp[2])
+        genuine=True, ambers_include=exp[2], link1='A-plain' if shows_text else None)
+
+# Identity withheld on a public Open receipt (PR 45 shape): link 1 and links
+# 3-5 are still checked, and a failure there is red, never masked by amber.
+W3 = json.loads((CAPTURED / 'entry-3-withheld.json').read_bytes())
+assert (W3.get('identity') or {}).get('redacted') is True and W3['entry']['tier'] == 'open'
+
+
+def withheld3_with(fn):
+    r = clone(W3)
+    fn(r)
+    return {'receipt.json': dump(r), 'merkle-root.ots': BATCH2_OTS,
+            'btc-block-header.bin': bytes.fromhex(r['bitcoin']['block_header_hex'])}
+
+
+add('forged-withheld-open-text-swap', withheld3_with(lambda r: r['entry'].__setitem__('text', 'Swapped text over a withheld-identity Open receipt')),
+    'red', 'R_CONTENT_MISMATCH', 'public Open receipt, identity withheld, text swapped: link 1 is still checked')
+
+
+def w_merkle(r):
+    r['merkle']['proof'][0]['hash'] = '0' * 64
+
+
+add('forged-withheld-open-merkle', withheld3_with(w_merkle), 'red', 'R_MERKLE',
+    'public Open receipt, identity withheld, Merkle path tampered: links 3-5 are still checked')
 
 # ---------------------------------------------------------------- legacy vectors (production policy)
 
@@ -407,9 +432,17 @@ files, _ = real3_with(lambda r: None, drop=('merkle-root.ots',))
 add('real3-no-ots', files, 'amber', 'A_NO_OTS', 'genuine receipt without its OTS file')
 files, _ = real3_with(lambda r: r['bitcoin'].__setitem__('block_header_hex', None), drop=('btc-block-header.bin',))
 add('real3-no-header', files, 'amber', 'A_NO_HEADER', 'genuine receipt without a bundled header')
-files, _ = real3_with(lambda r: None)
+def t_pending(r):
+    r['bitcoin'].update(anchored=False, btc_block=None, block_hash=None, block_header_hex=None, status='pending')
+
+
+files, _ = real3_with(t_pending, drop=('btc-block-header.bin',))
 files['merkle-root.ots'] = ots_pending(R3['merkle']['merkle_root'])
 add('real3-ots-pending', files, 'amber', 'A_OTS_PENDING', 'OTS with only a pending calendar attestation')
+files, _ = real3_with(lambda r: None)
+files['merkle-root.ots'] = ots_pending(R3['merkle']['merkle_root'])
+add('forged-btc-block-pending-ots', files, 'red', 'R_OTS',
+    'receipt claims btc_block 941015 but its OTS proof is pending only: the amber cannot mask the false claim')
 files, _ = real3_with(lambda r: r['bitcoin'].__setitem__('btc_block', '941022'))
 add('forged-btc-block-not-attested', files, 'red', 'R_OTS', 'btc_block names a height the OTS does not attest')
 
