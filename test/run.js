@@ -120,6 +120,11 @@ async function main() {
     for (const row of manifest) {
         const result = await runVector(row);
         seenCodes.add(row.code);
+        if (result.overall === 'amber') {
+            const claims = /anchor (is )?proven/i.test(result.summary);
+            check(claims === (typeof result.blockHeight === 'number'),
+                `${row.name}: amber summary claims the anchor only when it was verified (claims=${claims}, verified=${typeof result.blockHeight === 'number'})`);
+        }
         check(result.label === core.outcomeLabel(result.code), `${row.name}: result.label is the label for ${result.code}`);
         if (result.code === 'G_HIDDEN') {
             check(!/verified/i.test(result.label) && !/^verified/i.test(result.summary),

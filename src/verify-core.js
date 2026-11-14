@@ -32,7 +32,8 @@ const OP_FORK = 0xff;
 const OP_APPEND = 0xf0;
 const OP_PREPEND = 0xf1;
 const OP_SHA256 = 0x08;
-const OP_RIPEMD160 = 0x02;
+const OP_SHA1 = 0x02;
+const OP_RIPEMD160 = 0x03;
 
 // =====================================================================
 // Hash + encoding helpers (browser SubtleCrypto; Node fallback exposed
@@ -326,6 +327,9 @@ function parseReceipt(receipt, owner, envelopeBytes) {
     // Entry: text, tier, timestamp.
     const entry = receipt.entry;
     if (!isObj(entry)) return bad('R_FIELD_FORMAT', 'receipt.entry missing');
+    if (!(typeof entry.id === 'number' && Number.isSafeInteger(entry.id) && entry.id > 0)) {
+        return bad('R_FIELD_FORMAT', 'entry.id is not a positive integer');
+    }
     if (typeof entry.text !== 'string') return bad('R_FIELD_FORMAT', 'entry.text missing or not a string');
     if (entry.text.includes('\u0000')) return bad('R_FIELD_FORMAT', 'entry.text contains a NUL character');
     let tier = entry.tier;
@@ -435,6 +439,9 @@ function parseReceipt(receipt, owner, envelopeBytes) {
             ownerSalt = owner.salt;
         }
     }
+    if (merkle === null && (btcBlock !== null || blockHash !== null || headerHex !== null)) {
+        return bad('R_FIELD_FORMAT', 'the receipt says the entry is not batched but carries Bitcoin anchor fields');
+    }
     if (!absent(envelopeBytes) && !(envelopeBytes instanceof Uint8Array)) {
         return bad('R_FIELD_FORMAT', 'envelope.json could not be read as bytes');
     }
@@ -442,7 +449,7 @@ function parseReceipt(receipt, owner, envelopeBytes) {
     return {
         ok: true,
         r: {
-            legacy, boundRule, statedContentRule, tier, text: entry.text, createdAt: entry.created_at,
+            entryId: entry.id, legacy, boundRule, statedContentRule, tier, text: entry.text, createdAt: entry.created_at,
             identity, hashText, hashBound: hashes.hash_bound, commitSalt, merkle, btcBlock, blockHash,
             headerHex, ownerPlaintext, ownerSalt, envelopeBytes: envelopeBytes || null,
         },
@@ -580,9 +587,11 @@ async function applyOp(reader, opCode, currentHash) {
         return out;
     }
     if (opCode === OP_SHA256) return await sha256Bytes(currentHash);
-    if (opCode === OP_RIPEMD160) {
-        throw new Error('RIPEMD160 operation in proof — not supported by this verifier (uncommon for Bitcoin OTS proofs)');
-    }
+    // SHA-1 (0x02) and RIPEMD160 (0x03) are valid OpenTimestamps ops but are
+    // not used on Tower's proofs (calendar paths are SHA-256 only). Rejecting
+    // them keeps the verifier's hash surface to SHA-256 alone.
+    if (opCode === OP_SHA1) throw new Error('SHA-1 operation in proof — not supported by this verifier');
+    if (opCode === OP_RIPEMD160) throw new Error('RIPEMD160 operation in proof — not supported by this verifier');
     throw new Error(`unknown op code 0x${opCode.toString(16)}`);
 }
 
@@ -603,11 +612,14 @@ async function walkOtsTree(reader, currentHash, attestations, depth) {
             if (payloadLen > 8192) throw new Error('OTS attestation payload too large');
             const payload = reader.readBytes(payloadLen);
             if (tagHex === ATTESTATION_TAG_BITCOIN) {
-                const height = new OtsReader(payload).readVarint();
+                const sub = new OtsReader(payload);
+                const height = sub.readVarint();
+                if (!sub.eof()) throw new Error('OTS Bitcoin attestation payload has trailing bytes');
                 attestations.push({ type: 'bitcoin', blockHeight: height, finalHash: new Uint8Array(currentHash) });
             } else if (tagHex === ATTESTATION_TAG_PENDING) {
                 const sub = new OtsReader(payload);
                 const url = new TextDecoder().decode(sub.readBytes(sub.readVarint()));
+                if (!sub.eof()) throw new Error('OTS pending attestation payload has trailing bytes');
                 attestations.push({ type: 'pending', url, finalHash: new Uint8Array(currentHash) });
             } else {
                 attestations.push({ type: 'unknown', tagHex, finalHash: new Uint8Array(currentHash) });
@@ -639,6 +651,7 @@ async function parseOtsProof(otsBytes, initialHashHex) {
     }
     const attestations = [];
     await walkOtsTree(reader, new Uint8Array(fileHash), attestations, 0);
+    if (!reader.eof()) throw new Error(`OTS proof has ${otsBytes.length - reader.pos} trailing bytes after the timestamp`);
     return attestations;
 }
 
@@ -723,9 +736,9 @@ const SUMMARIES = {
     A_OTS_PENDING: 'Anchor pending — the timestamp proof has no Bitcoin confirmation yet. Re-download the receipt later.',
     A_NO_OTS: 'Anchor not checked — this receipt carries no OpenTimestamps proof (public receipts do not). Download the proof ZIP to check the Bitcoin anchor.',
     A_NO_HEADER: 'Anchor not checked offline — no Bitcoin block header is bundled. Confirm the block on a public explorer.',
-    A_IDENTITY_WITHHELD: 'Anchor proven; identity withheld. Who carved it, and the tie from the content to the anchor, are shown only on the owner\'s receipt.',
-    A_BINDING_UNRECORDED: 'This leaf is anchored; how it was bound was not recorded. The text cannot be tied to the anchor.',
-    A_TREASURE_NO_ENVELOPE: 'The anchor is proven; the Treasure envelope (envelope.json) was not supplied, so its content is not checked.',
+    A_IDENTITY_WITHHELD: 'Identity withheld. Who carved it, and the tie from the content to the anchor, are shown only on the owner\'s receipt.',
+    A_BINDING_UNRECORDED: 'How this leaf was bound was not recorded. The text cannot be tied to the anchor.',
+    A_TREASURE_NO_ENVELOPE: 'The Treasure envelope (envelope.json) was not supplied, so its content is not checked.',
 };
 
 async function verifyReceiptArtifacts(input, options) {
@@ -734,7 +747,7 @@ async function verifyReceiptArtifacts(input, options) {
     const policy = testPolicy ? options.testHeaderPolicy : PINNED_HEADER_POLICY;
     const steps = [];
     const log = (name, status, detail) => steps.push({ name, status, detail });
-    const state = { link1Rule: 'not evaluated', link2Rule: 'not evaluated' };
+    const state = { link1Rule: 'not evaluated', link2Rule: 'not evaluated', entryId: null };
     const finish = (code, summary, extra = {}) => ({
         overall: OUTCOME_CODES[code],
         code,
@@ -742,6 +755,7 @@ async function verifyReceiptArtifacts(input, options) {
         summary: (testPolicy ? '[TEST HEADER POLICY] ' : '') + summary,
         link1Rule: state.link1Rule,
         link2Rule: state.link2Rule,
+        entryId: state.entryId,
         testPolicy,
         steps,
         ...extra,
@@ -761,6 +775,7 @@ async function verifyReceiptArtifacts(input, options) {
     const parsed = parseReceipt(receipt, owner, envelopeBytes);
     if (!parsed.ok) return red(parsed.code, 'formats', parsed.detail);
     const r = parsed.r;
+    state.entryId = r.entryId;
     log('formats', 'pass', `receipt v${r.legacy ? LEGACY_RECEIPT_VERSION : V3_RECEIPT_VERSION}, tier ${r.tier}, binding rule ${r.boundRule}${r.identity === null ? ', identity withheld' : ''}`);
 
     // Step 2 — tier and marker.
@@ -793,6 +808,15 @@ async function verifyReceiptArtifacts(input, options) {
     } else {
         let subject = null;
         let fromOwner = false;
+        if (!hidden && r.ownerPlaintext !== null && r.ownerPlaintext !== r.text) {
+            return red('R_CONTENT_MISMATCH', 'link-1 content', 'the supplied plaintext is not the text this receipt shows');
+        }
+        if (r.ownerSalt !== null && contentRule === 'A-plain') {
+            return red('R_CONTENT_MISMATCH', 'link-1 content', 'a salt was supplied, but this entry is A-plain and has no salt');
+        }
+        if (r.ownerSalt !== null && r.commitSalt !== null && r.ownerSalt !== r.commitSalt) {
+            return red('R_CONTENT_MISMATCH', 'link-1 content', 'the supplied salt is not the salt this receipt carries');
+        }
         if (!hidden) subject = r.text;
         else if (r.ownerPlaintext !== null) {
             subject = r.ownerPlaintext;
@@ -810,7 +834,8 @@ async function verifyReceiptArtifacts(input, options) {
             log('link-1 content', 'pass', 'sha256(text) = hash_text (A-plain)');
             provenContent = subject;
         } else {
-            const salt = fromOwner ? (r.ownerSalt || r.commitSalt) : (r.commitSalt || r.ownerSalt);
+            // A shown (revealed) text is judged by the receipt's own salt only.
+            const salt = fromOwner ? (r.ownerSalt || r.commitSalt) : r.commitSalt;
             if (salt === null) {
                 return red('R_SALT_MISSING', 'link-1 content', fromOwner
                     ? 'this entry is salted (A-salted); supply the salt (or the key file) with the plaintext'
@@ -850,6 +875,9 @@ async function verifyReceiptArtifacts(input, options) {
 
     // Links 3–5 — leaf to root, root to header, header is real.
     let anchor = null;
+    if (r.merkle === null && (otsBytes || blockHeaderBytes !== null)) {
+        return red('R_FIELD_FORMAT', 'formats', 'the receipt says the entry is not batched but the ZIP carries an OpenTimestamps proof or a block header');
+    }
     if (r.merkle === null) {
         ambers.push('A_NOT_BATCHED');
         log('link-3 merkle', 'amber', 'entry not yet batched; anchor pending');
@@ -865,12 +893,15 @@ async function verifyReceiptArtifacts(input, options) {
         }
 
         let header = null;
+        if (blockHeaderBytes !== null && !(blockHeaderBytes instanceof Uint8Array && blockHeaderBytes.length === 80)) {
+            return red('R_HEADER', 'link-5 header', 'btc-block-header.bin is not exactly 80 bytes');
+        }
         if (r.headerHex !== null) {
             header = hexToBytes(r.headerHex);
-            if (blockHeaderBytes && blockHeaderBytes.length > 0 && !bytesEqual(header, blockHeaderBytes)) {
+            if (blockHeaderBytes !== null && !bytesEqual(header, blockHeaderBytes)) {
                 return red('R_HEADER', 'link-5 header', 'btc-block-header.bin disagrees with receipt.bitcoin.block_header_hex');
             }
-        } else if (blockHeaderBytes && blockHeaderBytes.length > 0) {
+        } else if (blockHeaderBytes !== null) {
             return red('R_FIELD_FORMAT', 'formats', 'btc-block-header.bin is bundled but the receipt carries no block_header_hex / btc_block for it');
         }
         let real = null;
@@ -902,13 +933,16 @@ async function verifyReceiptArtifacts(input, options) {
                 if (r.btcBlock !== null) {
                     return red('R_OTS', 'link-4 ots', `receipt claims block ${r.btcBlock} but the OTS proof has no Bitcoin attestation (pending only)`);
                 }
+                if (r.blockHash !== null) {
+                    return red('R_OTS', 'link-4 ots', 'receipt claims a block hash but the OTS proof has no Bitcoin attestation (pending only)');
+                }
                 ambers.push('A_OTS_PENDING');
                 log('link-4 ots', 'amber', 'only pending calendar attestations; no Bitcoin confirmation yet');
-                if (!header) ambers.push('A_NO_HEADER');
             } else {
                 let chosen;
                 if (r.btcBlock !== null) {
-                    chosen = btc.find((a) => a.blockHeight === r.btcBlock);
+                    const atHeight = btc.filter((a) => a.blockHeight === r.btcBlock);
+                    chosen = (header && atHeight.find((a) => bytesEqual(a.finalHash, header.subarray(36, 68)))) || atHeight[0];
                     if (!chosen) {
                         return red('R_OTS', 'link-4 ots', `receipt claims block ${r.btcBlock} but the OTS proof attests ${btc.map((a) => a.blockHeight).join(', ')}`);
                     }
@@ -938,7 +972,10 @@ async function verifyReceiptArtifacts(input, options) {
     if (ambers.length > 0) {
         const code = AMBER_PRIORITY.find((c) => ambers.includes(c));
         const others = ambers.filter((c) => c !== code).map((c) => SUMMARIES[c]);
-        return finish(code, SUMMARIES[code] + (others.length ? ' Also: ' + others.join(' ') : ''), { ambers, ...anchorExtra, ...stated });
+        const anchorLine = anchor
+            ? ` The anchor is proven: the leaf reaches block ${anchor.blockHeight}, whose header carries real launch-era work.`
+            : ' The Bitcoin anchor was not fully checked.';
+        return finish(code, SUMMARIES[code] + (others.length ? ' Also: ' + others.join(' ') : '') + anchorLine, { ambers, ...anchorExtra, ...stated });
     }
 
     // Green needs all five links. Pick which green.

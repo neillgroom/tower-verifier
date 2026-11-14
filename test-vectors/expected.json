@@ -702,5 +702,140 @@
   "code": "R_CONTENT_MISMATCH",
   "desc": "pinned exception still checks link 1",
   "testPolicy": true
+ },
+ {
+  "name": "owner-contradicts-revealed-text",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "revealed salted receipt + owner plaintext that differs from the shown text",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal. (edited)"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "owner-contradicts-revealed-salt",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "revealed salted receipt + owner salt that differs from the receipt salt",
+  "owner": {
+   "salt": "abababababababababababababababababababababababababababababababab"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "owner-agrees-revealed",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "revealed salted receipt + the same plaintext and salt from the owner",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal.",
+   "salt": "66c737db5f67fdd09273a03a6dc911d85d262ad87974037fef1d4832d4f47f54"
+  },
+  "testPolicy": true,
+  "link1": "A-salted",
+  "link2": "B-v3"
+ },
+ {
+  "name": "owner-salt-on-plain",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "genuine A-plain Open receipt + an owner salt: A-plain has no salt",
+  "owner": {
+   "salt": "abababababababababababababababababababababababababababababababab"
+  }
+ },
+ {
+  "name": "forged-entry-id-object",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "entry.id is object, not a positive integer"
+ },
+ {
+  "name": "forged-entry-id-string",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "entry.id is string, not a positive integer"
+ },
+ {
+  "name": "forged-entry-id-zero",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "entry.id is zero, not a positive integer"
+ },
+ {
+  "name": "forged-entry-id-fraction",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "entry.id is fraction, not a positive integer"
+ },
+ {
+  "name": "forged-unbatched-with-ots",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "merkle null but a merkle-root.ots is bundled"
+ },
+ {
+  "name": "forged-unbatched-with-header-file",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "merkle null but btc-block-header.bin is bundled"
+ },
+ {
+  "name": "forged-unbatched-with-btc-block",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "merkle null but btc_block is stated"
+ },
+ {
+  "name": "forged-unbatched-with-block-hash",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "merkle null but block_hash is stated"
+ },
+ {
+  "name": "forged-block-hash-pending-ots",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "block_hash stated but the OTS proof is pending only"
+ },
+ {
+  "name": "forged-empty-header-file",
+  "overall": "red",
+  "code": "R_HEADER",
+  "desc": "btc-block-header.bin is empty"
+ },
+ {
+  "name": "forged-long-header-file",
+  "overall": "red",
+  "code": "R_HEADER",
+  "desc": "btc-block-header.bin is 81 bytes"
+ },
+ {
+  "name": "forged-ots-trailing-bytes",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "one byte after the timestamp tree"
+ },
+ {
+  "name": "forged-ots-btc-payload-trailing",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "Bitcoin attestation payload has a byte after the height",
+  "testPolicy": true
+ },
+ {
+  "name": "ots-pending-then-bitcoin",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "OTS: pending attestation, then a Bitcoin attestation on the same message",
+  "testPolicy": true
+ },
+ {
+  "name": "ots-two-bitcoin-same-height",
+  "overall": "green",
+  "code": "G_CONTENT",
+  "desc": "OTS: two Bitcoin attestations at the claimed height; the one ending at the header is used",
+  "testPolicy": true
  }
 ]

@@ -33,6 +33,7 @@ malformed.
 | `entry.created_at` | exactly `YYYY-MM-DDTHH:MM:SS.mmmZ` (millisecond ISO-8601, UTC), and a real calendar instant (it round-trips through `Date.prototype.toISOString`) |
 | `identity.binding_identity` | 64 characters `[0-9a-f]` (phone hash) or a decimal user id `0` or `[1-9][0-9]*` (at most 15 digits). If `identity.binding_field` is present it must be `phone_hash` for the first form and `user_id` for the second |
 | `entry.tier` | one of `open`, `sealed`, `tomb`, `treasure`. A legacy receipt (protocol 1 or 2) may omit it; the verifier then reads `[SEALED]` text as `sealed` and anything else as `open` |
+| `entry.id` | a positive integer (JSON number) |
 | `entry.text` | a string containing no NUL (U+0000) |
 | `bitcoin.btc_block` | a positive integer, as a JSON number or a string of decimal digits |
 | `bitcoin.block_header_hex` | exactly 160 characters `[0-9a-f]` (80 bytes) |
@@ -161,7 +162,9 @@ was not recorded". Every other link is still checked.
 `node(left, right) = sha256_hex( ascii(left_hex || right_hex) )`, walking
 `merkle.proof` from `hash_bound`; each step's `position` says where the
 sibling sits. `merkle.proof === null && merkle.merkle_root === null` means
-not yet batched (amber).
+not yet batched (amber). An unbatched receipt that states `btc_block`,
+`block_hash` or `block_header_hex`, or whose ZIP carries `merkle-root.ots` or
+`btc-block-header.bin`, contradicts itself and is red.
 
 ## Links 4 and 5: OpenTimestamps and the header
 
@@ -172,7 +175,14 @@ not yet batched (amber).
   are red (`R_OTS`) and are detected without hashing the oversized message.
 - `bitcoin.btc_block` must equal one of the Bitcoin attestation heights. A
   receipt that states `btc_block` while its OTS proof carries only pending
-  attestations is red (`R_OTS`), not amber: the claim is false.
+  attestations is red (`R_OTS`), not amber: the claim is false. The same
+  holds for a stated `block_hash`. When several Bitcoin attestations sit at the
+  stated height, the one ending at the header's Merkle root is used.
+- The proof must end exactly where the timestamp tree ends, and each
+  attestation payload must be consumed exactly; trailing bytes are red.
+  Supported ops: append (0xf0), prepend (0xf1), SHA-256 (0x08). SHA-1 (0x02)
+  and RIPEMD160 (0x03) are red: Tower's proofs never use them.
+- `btc-block-header.bin`, when present, must be exactly 80 bytes.
 - The header is real when, in this order:
   1. the claimed height (`btc_block`, else the lowest attested height) is at
      least `MIN_ANCHOR_HEIGHT = 940842` (`R_HEADER_HEIGHT`);
@@ -197,6 +207,14 @@ real launch-era Bitcoin work. It does not prove the block is in the main
 chain; the result links the block on a public explorer for that one-click
 check. Forging a header that passes would need mining a block at real
 Bitcoin difficulty (at today's difficulty, roughly the cost of one block).
+
+## Owner input
+
+The owner may supply a plaintext and a salt (typed, or from the key file).
+On a hidden receipt (`[SEALED]`) they are checked by link 1. On a receipt
+that shows its text they must agree with it: a different plaintext, a salt
+different from `commit_salt`, or any salt on an `A-plain` entry is red
+(`R_CONTENT_MISMATCH`).
 
 ## Outcome codes
 

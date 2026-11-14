@@ -692,6 +692,108 @@ c58b['entry']['text'] = SWAP
 add('pinned-58-text-swap', anchored(c58b), 'red', 'R_CONTENT_MISMATCH',
     'pinned exception still checks link 1', test_policy=True)
 
+# ---------------------------------------------------------------- code board 1 repairs
+
+# Owner input that contradicts a revealed receipt is red, never ignored.
+rev = v3_receipt('sealed', SECRET, 'A-salted', SEALED_HT, salt_in_receipt=SALT)
+add('owner-contradicts-revealed-text', anchored(clone(rev)), 'red', 'R_CONTENT_MISMATCH',
+    'revealed salted receipt + owner plaintext that differs from the shown text',
+    owner={'plaintext': SECRET + ' (edited)'}, test_policy=True)
+add('owner-contradicts-revealed-salt', anchored(clone(rev)), 'red', 'R_CONTENT_MISMATCH',
+    'revealed salted receipt + owner salt that differs from the receipt salt',
+    owner={'salt': 'ab' * 32}, test_policy=True)
+add('owner-agrees-revealed', anchored(clone(rev)), 'green', 'G_CONTENT',
+    'revealed salted receipt + the same plaintext and salt from the owner', owner={'plaintext': SECRET, 'salt': SALT},
+    test_policy=True, link1='A-salted', link2='B-v3')
+files, _ = real3_with(lambda r: None)
+add('owner-salt-on-plain', files, 'red', 'R_CONTENT_MISMATCH',
+    'genuine A-plain Open receipt + an owner salt: A-plain has no salt', owner={'salt': 'ab' * 32})
+
+# entry.id is a positive safe integer.
+for label, val in (('object', {'x': 1}), ('string', '3'), ('zero', 0), ('fraction', 3.5)):
+    files, _ = real3_with(lambda r, v=val: r['entry'].__setitem__('id', v))
+    add(f'forged-entry-id-{label}', files, 'red', 'R_FIELD_FORMAT', f'entry.id is {label}, not a positive integer')
+
+# An unbatched receipt may carry no anchor data.
+files, _ = real3_with(t_prebatch, drop=('btc-block-header.bin',))
+add('forged-unbatched-with-ots', files, 'red', 'R_FIELD_FORMAT',
+    'merkle null but a merkle-root.ots is bundled')
+files, _ = real3_with(t_prebatch, drop=('merkle-root.ots',))
+add('forged-unbatched-with-header-file', files, 'red', 'R_FIELD_FORMAT',
+    'merkle null but btc-block-header.bin is bundled')
+files, _ = real3_with(lambda r: (t_prebatch(r), r['bitcoin'].__setitem__('btc_block', '941015')),
+                      drop=('merkle-root.ots', 'btc-block-header.bin'))
+add('forged-unbatched-with-btc-block', files, 'red', 'R_FIELD_FORMAT', 'merkle null but btc_block is stated')
+files, _ = real3_with(lambda r: (t_prebatch(r), r['bitcoin'].__setitem__('block_hash', R3['bitcoin']['block_hash'])),
+                      drop=('merkle-root.ots', 'btc-block-header.bin'))
+add('forged-unbatched-with-block-hash', files, 'red', 'R_FIELD_FORMAT', 'merkle null but block_hash is stated')
+
+# A block hash under a pending-only proof is a false claim.
+files, _ = real3_with(lambda r: (t_pending(r), r['bitcoin'].__setitem__('block_hash', R3['bitcoin']['block_hash'])),
+                      drop=('btc-block-header.bin',))
+files['merkle-root.ots'] = ots_pending(R3['merkle']['merkle_root'])
+add('forged-block-hash-pending-ots', files, 'red', 'R_OTS', 'block_hash stated but the OTS proof is pending only')
+
+# A header file, when supplied, is exactly 80 bytes.
+files, _ = real3_with(lambda r: None)
+files['btc-block-header.bin'] = b''
+add('forged-empty-header-file', files, 'red', 'R_HEADER', 'btc-block-header.bin is empty')
+files, _ = real3_with(lambda r: None)
+files['btc-block-header.bin'] = REAL3['btc-block-header.bin'] + b'\x00'
+add('forged-long-header-file', files, 'red', 'R_HEADER', 'btc-block-header.bin is 81 bytes')
+
+# Nothing may follow the timestamp tree or an attestation payload.
+files, _ = real3_with(lambda r: None)
+files['merkle-root.ots'] = BATCH2_OTS + b'\x08'
+add('forged-ots-trailing-bytes', files, 'red', 'R_OTS', 'one byte after the timestamp tree')
+
+
+def ots_btc_payload_trailing(root_hex, height):
+    payload = varint(height) + b'\x00'
+    body = ots_header(root_hex) + b'\x00' + TAG_BTC + varint(len(payload)) + payload
+    return body, hashlib.sha256(root_hex.encode('ascii')).digest()
+
+
+def anchored_with(r, ots_fn):
+    files = anchored(r)
+    root = r['merkle']['merkle_root']
+    files['merkle-root.ots'] = ots_fn(root)
+    return files
+
+
+rx = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+add('forged-ots-btc-payload-trailing', anchored_with(rx, lambda root: ots_btc_payload_trailing(root, SYN_HEIGHT)[0]),
+    'red', 'R_OTS', 'Bitcoin attestation payload has a byte after the height', test_policy=True)
+
+
+# Several attestations on one message: OpenTimestamps writes 0xff before
+# every item of a timestamp except the last. A pending attestation then a
+# Bitcoin one must both be read.
+def ots_pending_then_btc(root):
+    url = b'https://alice.btc.calendar.opentimestamps.org'
+    pend = varint(len(url)) + url
+    btc = varint(SYN_HEIGHT)
+    return (ots_header(root) + b'\xff' + b'\x00' + TAG_PENDING + varint(len(pend)) + pend
+            + b'\x00' + TAG_BTC + varint(len(btc)) + btc)
+
+
+rx = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+add('ots-pending-then-bitcoin', anchored_with(rx, ots_pending_then_btc), 'green', 'G_CONTENT',
+    'OTS: pending attestation, then a Bitcoin attestation on the same message', test_policy=True)
+
+
+# Two Bitcoin attestations at the claimed height: the first ends elsewhere
+# (after an append), the second at the header's merkle root.
+def ots_two_btc_same_height(root):
+    btc = varint(SYN_HEIGHT)
+    att = b'\x00' + TAG_BTC + varint(len(btc)) + btc
+    return ots_header(root) + b'\xff' + b'\xf0\x01\x41' + att + att
+
+
+rx = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+add('ots-two-bitcoin-same-height', anchored_with(rx, ots_two_btc_same_height), 'green', 'G_CONTENT',
+    'OTS: two Bitcoin attestations at the claimed height; the one ending at the header is used', test_policy=True)
+
 # ---------------------------------------------------------------- pinned format vectors
 
 fv = {
