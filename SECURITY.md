@@ -44,14 +44,14 @@ Each row is pinned by vectors in `test-vectors/` (`expected.json` names the outc
 | 9 | Hidden carve presented as verified content | A Sealed / Time Capsule receipt showing only `[SEALED]` is labelled "commitment anchored, content hidden" and claims no content; the receipt's `created_at` is never shown as a proven date |
 | 10 | ZIP-bomb DoS | Hard caps: 50 MB compressed, 25 MB per file, 20 entries |
 | 11 | Path traversal / XSS via crafted filenames or receipt strings | Filename allowlist + safe-character regex; every receipt string is inserted with `textContent`, never as HTML |
-| 12 | Malicious CDN or exfiltration | All JS vendored or local; CSP `default-src 'none'; script-src 'self'; connect-src 'none'`; owner plaintext and key files never leave the page |
+| 12 | Malicious CDN or exfiltration | All JS vendored or local; CSP `default-src 'none'; script-src 'self'; connect-src 'none'`; the page takes no plaintext, salt or key file |
 | 13 | Compromised SubtleCrypto | Self-test on a known SHA-256 vector; abort on mismatch |
 
 ## Threats this verifier explicitly does NOT defend against
 
 - **Compromised verifier repo.** If an attacker pushes a malicious commit to `neillgroom/tower-verifier`, anyone running the live `neillgroom.github.io/tower-verifier` version would run their code. Mitigation: every release lists vendor SHA-256s in `CHANGELOG.md`. Power users clone the repo at a known-good tag and run `scripts/verify-vendor.sh`.
 - **Phishing a fake verifier URL.** A user who runs a copy of this code on `tower-verifier-totally-real.com` is trusting that site. Mitigation: the live UI displays its own `window.location.href` so users can confirm the URL matches the one printed in their receipt's `README.txt`. Always cross-check.
-- **The content of an unrevealed sealed carve.** For Sealed and Time Capsule entries the verifier proves a commitment was anchored. It proves what was carved only when the owner supplies the plaintext (and salt or key file), checked locally.
+- **The content of an unrevealed sealed carve.** For Sealed and Time Capsule entries the verifier proves a commitment was anchored. It does not prove what was carved; the page takes no plaintext or key, and the owner checks content on The Tower's decrypt page.
 - **Main-chain membership.** Offline, a green result proves the bundled header carries real launch-era Bitcoin work: its target is at or below a ceiling pinned from the real blocks The Tower has anchored, its height and date are at or after The Tower's first anchor, and its hash meets its own target. It does NOT prove the block is in the main Bitcoin chain. Confirm that with the explorer link on a green result, or your own node. Forging a header that passes would need mining a block at real Bitcoin difficulty.
 - **Who carved a public receipt.** Public receipts withhold the carver's identity, so link 2 cannot be checked on them; they are AMBER. Only the owner's own receipt can be green.
 

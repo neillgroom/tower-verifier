@@ -3,8 +3,10 @@
 // Imports verify-core via window.TowerVerifyCore. Uses vendored JSZip
 // via window.JSZip. Both are loaded by index.html.
 //
-// Nothing typed or loaded here leaves the page: the CSP sets
-// connect-src 'none', and this file makes no network call.
+// Nothing loaded here leaves the page: the CSP sets connect-src 'none', and
+// this file makes no network call. The page takes no owner input (plaintext,
+// salt or key file); hidden content is checked on The Tower's decrypt page.
+// The only link to it is an ordinary <a href>; nothing is fetched.
 
 (function () {
     const core = window.TowerVerifyCore;
@@ -27,11 +29,9 @@
         return e;
     };
 
-    // The receipt currently loaded, so the owner panel can re-verify it.
-    let current = null;
-    // Every ZIP selection and every owner check takes a new generation; a
-    // run that finishes after a newer one started is discarded, success or
-    // error alike.
+    const DECRYPT_PAGE = 'https://thetower.one/decrypt.html';
+    // Every ZIP selection takes a new generation; a run that finishes after
+    // a newer one started is discarded, success or error alike.
     let generation = 0;
     const isStale = (gen) => gen !== generation;
 
@@ -108,45 +108,42 @@
         out.appendChild(stepsBox);
 
         // Content. Only content the verifier proved is presented as proven.
-        // Only an entry id the core validated (a positive integer) is shown.
-        const entryId = Number.isSafeInteger(result.entryId) ? `#${result.entryId}` : '(id not validated)';
+        // The entry id is shown only when the core validated it as a
+        // positive integer.
+        const entryLabel = Number.isSafeInteger(result.entryId) && result.entryId > 0 ? `Entry #${result.entryId}` : 'Entry';
         if (result.code === 'G_ENVELOPE') {
             const box = el('div', 'entry-text');
-            box.appendChild(el('h4', null, `Entry ${entryId} — Treasure envelope proven`));
+            box.appendChild(el('h4', null, `${entryLabel} — Treasure envelope proven`));
             box.appendChild(el('p', 'subtle', 'The envelope.json in this ZIP is the envelope anchored. Its contents stay sealed; nothing beyond the envelope bytes is claimed.'));
             out.appendChild(box);
         } else if (result.overall === 'green' && typeof result.provenContent === 'string') {
             const box = el('div', 'entry-text');
-            box.appendChild(el('h4', null, `Entry ${entryId} — proven content`));
+            box.appendChild(el('h4', null, `${entryLabel} — proven content`));
             box.appendChild(el('pre', null, result.provenContent));
             out.appendChild(box);
         } else if (result.code === 'G_HIDDEN') {
             const box = el('div', 'entry-text');
-            box.appendChild(el('h4', null, `Entry ${entryId} — content hidden`));
-            box.appendChild(el('p', 'subtle', 'No content is shown, so none is claimed. The owner can check their plaintext below; it never leaves this page.'));
+            box.appendChild(el('h4', null, `${entryLabel} — content hidden`));
+            box.appendChild(el('p', 'subtle', 'No content is shown, so none is claimed.'));
+            const p = el('p', 'subtle', 'The owner can decrypt and check the content with The Tower\'s decrypt page: ');
+            const a = document.createElement('a');
+            a.href = DECRYPT_PAGE;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = DECRYPT_PAGE;
+            p.appendChild(a);
+            box.appendChild(p);
             out.appendChild(box);
         } else if (receipt && receipt.entry && typeof receipt.entry.text === 'string'
             && receipt.entry.text !== core.SEALED_MARKER && receipt.entry.text !== core.TREASURE_MARKER) {
             const box = el('div', 'entry-text unproven');
-            box.appendChild(el('h4', null, `Entry ${entryId} — text in the receipt (NOT proven)`));
+            box.appendChild(el('h4', null, `${entryLabel} — text in the receipt (NOT proven)`));
             box.appendChild(el('pre', null, receipt.entry.text));
             out.appendChild(box);
         }
-
-        renderOwnerPanel(receipt);
-    }
-
-    // Owner panel: for sealed / tomb receipts, the owner may type the
-    // plaintext and salt (or load the tower-sealed-key-v1 key file) to check
-    // link 1 locally.
-    function renderOwnerPanel(receipt) {
-        const panel = $('ownerBox');
-        if (!panel) return;
-        panel.hidden = !core.ownerCheckApplies(receipt);
     }
 
     function renderError(message) {
-        if ($('ownerBox')) $('ownerBox').hidden = true;
         const out = $('result');
         out.replaceChildren();
         const light = el('div', 'traffic-light');
@@ -158,52 +155,61 @@
     }
 
     // Defensive ZIP extraction. Hard caps prevent ZIP-bomb DoS in the
-    // browser. Filename allowlist prevents path-traversal / XSS via
-    // crafted filenames.
-    const MAX_ZIP_BYTES = 50 * 1024 * 1024;
-    const MAX_FILE_BYTES = 25 * 1024 * 1024;
-    const MAX_ENTRIES = 20;
-    const ALLOWED_FILES = new Set([
-        'receipt.json',
-        'merkle-root.ots',
-        'btc-block-header.bin',
-        'envelope.json',
-        'ciphertext.bin',
-        'ciphertext-meta.json',
-        'README.txt',
-    ]);
-    const TEXT_FILES = new Set(['receipt.json', 'README.txt', 'ciphertext-meta.json']);
+    // browser. Only the four files the verifier reads are inflated; every
+    // other entry is skipped unread.
+    const MAX_ZIP_BYTES = 50 * 1024 * 1024; //   compressed archive
+    const MAX_FILE_BYTES = 25 * 1024 * 1024; //  one inflated file
+    const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // all inflated files together
+    const MAX_ENTRIES = 20; //                   every record, directories included
+    const ALLOWED_FILES = new Set(['receipt.json', 'merkle-root.ots', 'btc-block-header.bin', 'envelope.json']);
     const SAFE_NAME = /^[a-zA-Z0-9._-]+$/;
 
-    // Inflate one entry, stopping as soon as the output passes the cap
-    // (a declared size can lie).
-    function inflateCapped(entry, name) {
+    // Read the record count from the End Of Central Directory before JSZip
+    // builds anything. ZIP64 archives (count 0xffff) are refused: a receipt
+    // never needs one.
+    function centralDirectoryCount(buf) {
+        const b = new Uint8Array(buf);
+        const lowest = Math.max(0, b.length - 22 - 0xffff);
+        for (let i = b.length - 22; i >= lowest; i--) {
+            if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) {
+                const total = b[i + 10] | (b[i + 11] << 8);
+                if (total === 0xffff) throw new Error('ZIP64 archives are not accepted');
+                return total;
+            }
+        }
+        throw new Error('not a ZIP file (no end-of-central-directory record)');
+    }
+
+    // Inflate one entry against a shared byte budget, stopping as soon as
+    // the output passes either the per-file cap or what is left of the
+    // budget for all files.
+    function inflateCapped(entry, name, budget) {
         return new Promise((resolve, reject) => {
             const chunks = [];
             let total = 0;
             let done = false;
+            const fail = (err) => {
+                if (done) return;
+                done = true;
+                reject(err);
+            };
             const stream = entry.internalStream('uint8array');
             stream
                 .on('data', (chunk) => {
                     if (done) return;
                     total += chunk.length;
-                    if (total > MAX_FILE_BYTES) {
-                        done = true;
+                    if (total > MAX_FILE_BYTES || total > budget.left) {
                         stream.pause();
-                        reject(new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`));
+                        fail(new Error(`${name} inflates past the size cap (${MAX_FILE_BYTES} bytes per file, ${MAX_TOTAL_BYTES} in all)`));
                         return;
                     }
                     chunks.push(chunk);
                 })
-                .on('error', (err) => {
-                    if (!done) {
-                        done = true;
-                        reject(err);
-                    }
-                })
+                .on('error', fail)
                 .on('end', () => {
                     if (done) return;
                     done = true;
+                    budget.left -= total;
                     const out = new Uint8Array(total);
                     let off = 0;
                     for (const c of chunks) {
@@ -221,52 +227,53 @@
             throw new Error(`ZIP too large (${file.size} bytes; max ${MAX_ZIP_BYTES})`);
         }
         const buf = await file.arrayBuffer();
+        const declared = centralDirectoryCount(buf);
+        if (declared > MAX_ENTRIES) {
+            throw new Error(`Too many entries in ZIP (${declared}; max ${MAX_ENTRIES})`);
+        }
         const zip = await JSZip.loadAsync(buf);
-        const fileNames = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
-        if (fileNames.length > MAX_ENTRIES) {
-            throw new Error(`Too many files in ZIP (${fileNames.length}; max ${MAX_ENTRIES})`);
+        const allNames = Object.keys(zip.files);
+        if (allNames.length > MAX_ENTRIES) {
+            throw new Error(`Too many entries in ZIP (${allNames.length}; max ${MAX_ENTRIES})`);
         }
 
-        // Pre-decompression size check from JSZip's entry metadata, before
-        // any inflation. Absent metadata is treated as 0 and re-checked
-        // after decompression below.
-        let totalUncompressed = 0;
-        for (const name of fileNames) {
-            const meta = zip.files[name]?._data;
-            const size = meta ? Number(meta.uncompressedSize) : NaN;
-            if (!Number.isSafeInteger(size) || size <= 0) {
-                throw new Error(`${name} does not declare a positive uncompressed size`);
-            }
+        // Only safe, allowed, non-directory names go further.
+        const wanted = allNames.filter((n) => !zip.files[n].dir && SAFE_NAME.test(n) && ALLOWED_FILES.has(n));
+
+        // Every file the verifier reads has content, so an empty one is
+        // refused by name. A declared size, when JSZip exposes one, is
+        // checked before inflating; JSZip exposes none for a 0-byte entry.
+        // Either way the inflated size is enforced while streaming below,
+        // because a declared size can lie.
+        for (const name of wanted) {
+            const meta = zip.files[name]._data;
+            const size = meta && typeof meta.uncompressedSize === 'number' ? meta.uncompressedSize : null;
+            if (size === null) continue;
+            if (size === 0) throw new Error(`${name} is empty; a receipt ZIP never carries an empty ${name}`);
             if (size > MAX_FILE_BYTES) {
                 throw new Error(`${name} declares ${size} bytes uncompressed (cap ${MAX_FILE_BYTES})`);
             }
-            totalUncompressed += size;
-        }
-        if (totalUncompressed > MAX_ZIP_BYTES) {
-            throw new Error(`Total uncompressed size ${totalUncompressed} exceeds ${MAX_ZIP_BYTES}`);
         }
 
+        const budget = { left: MAX_TOTAL_BYTES };
         const result = {};
-        for (const name of fileNames) {
-            if (!SAFE_NAME.test(name)) continue;
-            if (!ALLOWED_FILES.has(name)) continue;
-            const entry = zip.files[name];
-            // envelope.json is read as raw bytes: A-envelope hashes the
-            // exact bytes in the ZIP, never a re-serialisation.
-            const bytes = await inflateCapped(entry, name);
-            result[name] = TEXT_FILES.has(name) ? new TextDecoder().decode(bytes) : bytes;
+        for (const name of wanted) {
+            // Raw bytes: A-envelope hashes the exact bytes in the ZIP.
+            const bytes = await inflateCapped(zip.files[name], name, budget);
+            if (bytes.length === 0) throw new Error(`${name} is empty; a receipt ZIP never carries an empty ${name}`);
+            result[name] = name === 'receipt.json' ? new TextDecoder().decode(bytes) : bytes;
         }
         return result;
     }
 
-    async function runVerify(owner, gen) {
-        const { receipt, contents } = current;
+    // The page never passes owner input to the core: hidden content is
+    // checked on The Tower's decrypt page, not here.
+    async function runVerify(receipt, contents, gen) {
         const result = await core.verifyReceiptArtifacts({
             receipt,
             otsBytes: contents['merkle-root.ots'] || null,
             blockHeaderBytes: contents['btc-block-header.bin'] || null,
             envelopeBytes: contents['envelope.json'] || null,
-            owner: owner || null,
         });
         if (isStale(gen)) return;
         renderResult(result, receipt);
@@ -274,7 +281,6 @@
 
     async function handleZipFile(file) {
         const gen = ++generation;
-        current = null;
         try {
             renderError('Extracting…');
             const contents = await extractZip(file);
@@ -283,80 +289,12 @@
                 throw new Error('ZIP does not contain receipt.json');
             }
             const receipt = JSON.parse(contents['receipt.json']);
-            current = { receipt, contents };
-            clearOwnerInputs();
-            await runVerify(null, gen);
+            await runVerify(receipt, contents, gen);
         } catch (err) {
             if (isStale(gen)) return;
             console.error(err);
-            current = null;
             renderError(`Verification error: ${err.message}`);
         }
-    }
-
-    // ---- owner inputs ------------------------------------------------
-
-    function clearOwnerInputs() {
-        if ($('ownerPlaintext')) $('ownerPlaintext').value = '';
-        if ($('ownerSalt')) $('ownerSalt').value = '';
-        if ($('ownerKey')) $('ownerKey').value = '';
-        if ($('ownerNote')) $('ownerNote').textContent = '';
-    }
-
-    function hexToBytesStrict(hex) {
-        if (!/^(?:[0-9a-fA-F]{2})+$/.test(hex)) throw new Error('not hex');
-        return core.hexToBytes(hex.toLowerCase());
-    }
-
-    // AES-256-GCM, 12-byte IV, no AAD — the inverse of the carve page's
-    // encryption. Runs locally; used only to recover the owner's plaintext
-    // from ciphertext.bin when the key file is supplied.
-    async function decryptCiphertext(keyHex, contents) {
-        const ctText = contents['ciphertext.bin'];
-        const meta = contents['ciphertext-meta.json'] ? JSON.parse(contents['ciphertext-meta.json']) : null;
-        if (!ctText || !meta || typeof meta.iv !== 'string') return null;
-        const ct = hexToBytesStrict(new TextDecoder().decode(ctText).trim());
-        const iv = hexToBytesStrict(meta.iv.trim());
-        const key = await crypto.subtle.importKey('raw', hexToBytesStrict(keyHex), 'AES-GCM', false, ['decrypt']);
-        const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
-        return new TextDecoder().decode(plain);
-    }
-
-    async function readKeyFile(file) {
-        if (file.size > 64 * 1024) throw new Error('that file is too large to be a key file');
-        const parsed = JSON.parse(await file.text());
-        if (!parsed || parsed.format !== 'tower-sealed-key-v1') throw new Error('that file is not a tower-sealed-key-v1 key file');
-        return parsed;
-    }
-
-    async function handleOwnerCheck() {
-        if (!current) return;
-        const gen = ++generation;
-        const note = $('ownerNote');
-        note.textContent = '';
-        let plaintext = $('ownerPlaintext').value;
-        let salt = $('ownerSalt').value.trim().toLowerCase();
-        const keyInput = $('ownerKey');
-        try {
-            if (keyInput.files && keyInput.files[0]) {
-                const kf = await readKeyFile(keyInput.files[0]);
-                if (!salt && typeof kf.commit_salt === 'string') salt = kf.commit_salt.trim().toLowerCase();
-                if (!plaintext && typeof kf.key_hex === 'string') {
-                    const dec = await decryptCiphertext(kf.key_hex.trim(), current.contents).catch(() => {
-                        throw new Error('the key file does not open the ciphertext in this ZIP');
-                    });
-                    if (dec === null) note.textContent = 'This ZIP carries no ciphertext; type the plaintext instead.';
-                    else plaintext = dec;
-                }
-            }
-        } catch (err) {
-            if (isStale(gen)) return;
-            note.textContent = `Key file: ${err.message}`;
-            return;
-        }
-        if (isStale(gen)) return;
-        await runVerify({ plaintext, salt }, gen);
-        return gen;
     }
 
     // ---- wiring -------------------------------------------------------
@@ -377,14 +315,6 @@
         drop.classList.remove('dragover');
         const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if (file) handleZipFile(file);
-    });
-    if ($('ownerCheck')) $('ownerCheck').addEventListener('click', () => {
-        const started = generation + 1;
-        handleOwnerCheck().catch((err) => {
-            if (isStale(started)) return;
-            console.error(err);
-            renderError(`Verification error: ${err.message}`);
-        });
     });
 
     // Display the verifier's own URL so users can confirm they're on

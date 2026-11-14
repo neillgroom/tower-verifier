@@ -23,8 +23,11 @@ Green now means every piece of content the receipt shows is tied, link by link, 
 
 ### UI
 - Proven date is the block header's timestamp; the receipt's `created_at` is shown only as "stated by the receipt" when link 2 held. Unproven receipt text is labelled NOT proven.
-- Owner check for Sealed / Time Capsule: plaintext + salt or a `tower-sealed-key-v1` key file, checked locally.
-- `envelope.json` added to the ZIP allowlist.
+- No in-page owner check: a hidden Sealed / Time Capsule result links The Tower's decrypt page for the owner. The core API still accepts owner plaintext and salt (covered by vectors); any owner input it cannot check is red.
+- ZIP: record count read from the central directory before parsing (20 max, directories included); only the four files the verifier reads are inflated; empty ones are refused; a cumulative inflated-size cap.
+- OpenTimestamps proofs are read by the strict grammar (no fork-of-fork, no repeated siblings, canonical varints, uint32 heights).
+- `envelope.json` added to the ZIP allowlist; README.txt and ciphertext files are no longer read.
+- No web font: the Google Fonts import is removed.
 
 ### CI
 - GitHub Pages deploy runs only after the test job passes.

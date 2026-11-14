@@ -42,14 +42,14 @@ Any check that runs and fails is **RED**, even if something else is also missing
 
 | Light | Meaning |
 |---|---|
-| **VERIFIED** (green) | The content shown (or the plaintext the owner supplied, or the Treasure envelope) was anchored in this block |
+| **VERIFIED** (green) | The content shown (or the Treasure envelope) was anchored in this block |
 | **COMMITMENT ANCHORED — CONTENT HIDDEN** (green) | A hidden Sealed / Time Capsule carve by this identity was anchored. No content is shown, so none is claimed |
 | **NOT FULLY PROVEN** (amber) | The anchor checks out but something is not proven: not yet batched, OTS pending, no OTS or header bundled, identity withheld (every public receipt), binding unrecorded (two pinned early entries), Treasure envelope not supplied |
 | **FAILED** (red) | A claim in the receipt is false or malformed; the result names which |
 
 The proven date is the Bitcoin block header's own timestamp. The receipt's `created_at` is shown only as "stated by the receipt", and only when link 2 held. Every result names the link-1 and link-2 rules it evaluated.
 
-**Owner check.** For a Sealed or Time Capsule entry, the owner can type the plaintext (and the salt, for protocol 3 entries) or load the `tower-sealed-key-v1` key file. It is checked in the page; the page's CSP (`connect-src 'none'`) forbids any network request.
+**Hidden content.** This page takes no plaintext, salt or key file. A hidden Sealed or Time Capsule entry shows "commitment anchored, content hidden"; its owner can decrypt and check the content with The Tower's decrypt page (https://thetower.one/decrypt.html), linked from the result. The page fetches nothing (CSP `connect-src 'none'`).
 
 ## What green does not prove
 
@@ -80,7 +80,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model. In brief:
 - **Not trusted:** anything fetched at verification time. The verifier fetches nothing; if a receipt is unconfirmed or incomplete it says so (amber) rather than guess.
 
 The verifier specifically does NOT:
-- Know a Sealed entry's plaintext unless its owner supplies it (Tower never holds the key)
+- Check a hidden Sealed or Time Capsule entry's plaintext (that is done on The Tower's decrypt page; Tower never holds the key)
 - Prove that the anchoring block is in the main chain (use the explorer link)
 - Search Tower for receipts (you must already have the ZIP)
 - Connect to The Tower's API (zero outbound calls)
