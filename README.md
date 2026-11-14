@@ -6,13 +6,13 @@
 
 ## What this is
 
-The Tower is a Bitcoin-anchored idea-timestamping service. Every "carve" gets a SHA-256 hash → Merkle batch → OpenTimestamps stamp → Bitcoin block anchor. Users can download a self-contained **receipt ZIP** containing everything needed to prove the carve mathematically.
+The Tower is a Bitcoin-anchored idea-timestamping service. Every "carve" gets a SHA-256 hash → Merkle batch → OpenTimestamps stamp → Bitcoin block anchor. Users can download a self-contained **receipt ZIP** containing everything the verifier checks offline.
 
 This repo is the receipt verifier. It's:
 
 - **Independent of The Tower.** Separate repo, separate domain, separate maintainer pathway. Audit it without reading Tower's server code.
 - **Static.** Pure HTML/CSS/JS. No build step. Open `index.html` in any modern browser, including from `file://`.
-- **Auditable.** ~400 lines of verification logic in `src/verify-core.js`. The OpenTimestamps file format is parsed inline — no third-party crypto library. The only vendored dependency is [JSZip](https://github.com/Stuk/jszip) (for reading the ZIP itself), with provenance locked in `vendor/vendor-lock.json`.
+- **Auditable.** About 1,000 lines of verification logic in one file, `src/verify-core.js`, with no DOM. The OpenTimestamps file format is parsed inline — no third-party crypto library. The only vendored dependency is [JSZip](https://github.com/Stuk/jszip) (for reading the ZIP itself), with provenance locked in `vendor/vendor-lock.json`.
 - **MIT licensed.**
 
 ## Usage
@@ -28,27 +28,34 @@ cd tower-verifier
 
 ## What gets verified
 
-The traffic-light result reflects this exact sequence (any failing step short-circuits to RED — there is no path to a false-positive GREEN):
+**Green means every piece of content the receipt shows is tied, link by link, to a Bitcoin block header that carries real work.** The byte-level contract is [`docs/formats.md`](docs/formats.md).
 
-1. **Self-test.** `SHA-256("The Tower")` must equal a known constant. If the browser's crypto is broken, abort.
-2. **Receipt version.** Must equal `1.2` (the current ZIP-shape contract).
-3. **Text hash.** `SHA-256(receipt.entry.text)` must equal `receipt.hashes.hash_text`.
-4. **Merkle proof.** Walk `receipt.merkle.proof` from `hash_bound` to `merkle_root` using The Tower's locked hex-string concatenation convention (see `docs/MERKLE-CONVENTION.md`).
-5. **OpenTimestamps proof.** Parse `merkle-root.ots` inline. Walk the operation tree. For each Bitcoin attestation, compute the final hash that would be the Bitcoin block's merkle_root.
-6. **Bitcoin block header.** SHA-256d the bundled 80-byte block header to derive the block hash. The header's merkle_root field (bytes 36-67) must match the OTS attestation's final hash. If `receipt.bitcoin.block_hash` is provided, it must match our computed block hash exactly.
+0. **Self-test.** `SHA-256("The Tower")` must equal a known constant, or nothing else is trusted.
+1. **Field formats and tier.** Hashes are exactly 64 lowercase hex, the timestamp is an exact millisecond ISO-8601 UTC string, the identity is a 64-hex phone hash or a decimal user id, and the shown text agrees with the tier (`[SEALED]` for a Time Capsule, `[TREASURE]` for a Treasure, never a marker on Open). Receipt version `1.2` (legacy) or `1.3` (protocol 3).
+2. **Link 1, content to commitment.** The text shown hashes to `hash_text`: `A-plain` for Open and for every Sealed / Time Capsule carved before protocol 3, `A-salted` for Sealed / Time Capsule from protocol 3, `A-envelope` (the bytes of `envelope.json`) for Treasure. The rule is fixed by the tier; a rule stated for the wrong tier is red.
+3. **Link 2, commitment to leaf.** `hash_text`, the timestamp and the identity hash to `hash_bound`, by exactly one of two formats: `B-hash` (every carve before protocol 3) or `B-v3` (domain-separated, from protocol 3). Nothing else is accepted.
+4. **Link 3, leaf to root.** The Merkle path from `hash_bound` reaches `merkle_root` (Tower's hex-string concatenation convention).
+5. **Link 4, root to header.** The OpenTimestamps proof, parsed inline with bounded size and operation count, ends at the Merkle root inside the bundled 80-byte header, at the height the receipt states.
+6. **Link 5, the header is real.** Pinned minimum height (940842, Tower's first anchored block), pinned absolute difficulty ceiling, pinned minimum date, and `sha256d(header)` below its own target. None of these depend on a value the receipt chooses.
 
-If all six pass: **GREEN.** The carve is mathematically anchored to a specific Bitcoin block.
+Any check that runs and fails is **RED**, even if something else is also missing. Only after every available link has passed may a missing piece make the result **AMBER**.
 
-States:
-- **GREEN** — verified, anchored at a specific block.
-- **AMBER** — carve is recorded but the Bitcoin confirmation is not yet captured in the ZIP. Re-download the receipt after the next OTS calendar upgrade (~1 hour after Bitcoin confirmation).
-- **RED** — verification failed; the detail will say which step and why.
+| Light | Meaning |
+|---|---|
+| **VERIFIED** (green) | The content shown (or the plaintext the owner supplied, or the Treasure envelope) was anchored in this block |
+| **COMMITMENT ANCHORED — CONTENT HIDDEN** (green) | A hidden Sealed / Time Capsule carve by this identity was anchored. No content is shown, so none is claimed |
+| **NOT FULLY PROVEN** (amber) | The anchor checks out but something is not proven: not yet batched, OTS pending, no OTS or header bundled, identity withheld (every public receipt), binding unrecorded (two pinned early entries), Treasure envelope not supplied |
+| **FAILED** (red) | A claim in the receipt is false or malformed; the result names which |
 
-## The "fully offline" claim
+The proven date is the Bitcoin block header's own timestamp. The receipt's `created_at` is shown only as "stated by the receipt", and only when link 2 held. Every result names the link-1 and link-2 rules it evaluated.
 
-The verifier makes **zero network calls** for confirmed entries. The 80-byte Bitcoin block header is bundled into the receipt ZIP at download time by Tower. The verifier hashes those 80 bytes locally to derive the block hash. The OTS proof's embedded Merkle path connects Tower's batch root to that block's merkle_root field.
+**Owner check.** For a Sealed or Time Capsule entry, the owner can type the plaintext (and the salt, for protocol 3 entries) or load the `tower-sealed-key-v1` key file. It is checked in the page; the page's CSP (`connect-src 'none'`) forbids any network request.
 
-This means the indestructibility claim works without The Tower, without GitHub Pages, without mempool.space, without any block explorer, without a Bitcoin node. The math is self-contained inside the ZIP. The verifier (this repo) is one tool that runs it; the standard `opentimestamps-client` CLI runs the same math via a different path. The ZIP's `README.txt` documents both.
+## What green does not prove
+
+Offline, green proves the header carries real launch-era Bitcoin work and that the receipt's content leads to it. It does not prove the block is in the main Bitcoin chain: confirm that with the explorer link shown on a green result (or your own node). Forging a header that passes would need mining a block at real Bitcoin difficulty.
+
+The verifier makes no network calls at all. The receipt ZIP carries everything it checks.
 
 ## Verifying the vendor
 
@@ -68,12 +75,13 @@ bash scripts/verify-vendor.sh
 
 See [SECURITY.md](SECURITY.md) for the full threat model. In brief:
 
-- **Trusted:** the math (SHA-256, Bitcoin's PoW), the browser's SubtleCrypto, the Bitcoin block headers embedded in confirmed receipts.
+- **Trusted:** the math (SHA-256, Bitcoin's PoW) and the browser's SubtleCrypto (self-tested). A bundled header is not trusted: it must meet the pinned height, work and date floors.
 - **Trusted-on-first-use:** Tower's `receipt.json` (we hash-check its claims), JSZip (vendored, locked).
-- **Not trusted:** anything fetched at verification time. The verifier doesn't fetch anything for confirmed entries; if you supply an unconfirmed receipt, it'll tell you so rather than guess.
+- **Not trusted:** anything fetched at verification time. The verifier fetches nothing; if a receipt is unconfirmed or incomplete it says so (amber) rather than guess.
 
 The verifier specifically does NOT:
-- Validate Sealed-tier *plaintext* (Tower never holds the key; verifier proves the hash was anchored, not what was encrypted)
+- Know a Sealed entry's plaintext unless its owner supplies it (Tower never holds the key)
+- Prove that the anchoring block is in the main chain (use the explorer link)
 - Search Tower for receipts (you must already have the ZIP)
 - Connect to The Tower's API (zero outbound calls)
 
@@ -81,7 +89,7 @@ The verifier specifically does NOT:
 
 The npm package is CommonJS-only and depends deeply on Node.js stdlib + several heavy npm modules (request-promise, bitcore-lib). Bundling it for the browser requires polyfills and inflates the audit surface to ~250KB of vendored third-party code.
 
-We instead implement the OpenTimestamps file format inline in `src/verify-core.js`. The format is well-documented at the [python-opentimestamps file-format spec](https://github.com/opentimestamps/python-opentimestamps/blob/master/doc/file-format.md), and the operations used by Bitcoin proofs are small: `append`, `prepend`, `sha256`, `fork`, plus the Bitcoin and pending-calendar attestation tags. The whole parser is ~120 lines.
+We instead implement the OpenTimestamps file format inline in `src/verify-core.js`. The format is well-documented at the [python-opentimestamps file-format spec](https://github.com/opentimestamps/python-opentimestamps/blob/master/doc/file-format.md), and the operations used by Bitcoin proofs are small: `append`, `prepend`, `sha256`, `fork`, plus the Bitcoin and pending-calendar attestation tags. The whole parser is about 150 lines.
 
 This trades library convenience for audit transparency — a deliberate choice for an indestructibility tool.
 
@@ -90,7 +98,6 @@ This trades library convenience for audit transparency — a deliberate choice f
 ```
 tower-verifier/
 ├── index.html              # Drag-and-drop UI
-├── verify.js               # Entry point (~loads modules)
 ├── style.css
 ├── src/
 │   ├── verify-core.js      # Crypto, OTS parser, top-level verifier (zero DOM)
@@ -99,9 +106,13 @@ tower-verifier/
 │   ├── jszip.min.js
 │   ├── jszip.LICENSE
 │   └── vendor-lock.json    # Upstream SHA-256s
+├── docs/
+│   └── formats.md          # Receipt byte layouts and outcome codes
 ├── scripts/
-│   └── verify-vendor.sh
-├── test-vectors/           # Real receipt ZIPs for CI tests
+│   ├── verify-vendor.sh
+│   ├── build-test-vectors.py      # Independent (Python) builder of every vector
+│   └── derive-header-constants.js # Re-derives the pinned header floors
+├── test-vectors/           # Genuine and forged receipt ZIPs + expected.json
 ├── test/
 │   └── run.js              # Node-side test harness
 ├── README.md

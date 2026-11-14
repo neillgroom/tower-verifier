@@ -14,40 +14,46 @@ If GitHub is unavailable, email Neill Groom (security@thetower.one) with a descr
 
 - The math: SHA-256, Bitcoin's proof-of-work, OpenTimestamps' file format.
 - The browser's `SubtleCrypto` SHA-256 (we run a self-test at load to confirm).
-- Bitcoin block headers bundled inside a confirmed receipt ZIP. These are 80 bytes of well-defined binary; we hash them locally to derive the block hash and don't trust any provider.
+- Bitcoin's proof of work, judged against floors pinned in the verifier (minimum height 940842, an absolute difficulty ceiling, a minimum date), never against values the receipt chooses. A bundled header itself is not trusted.
 
 ### Trusted-on-first-use (verifiable)
 
-- Tower's `receipt.json`: we hash-check every claim. If a claim disagrees with the math, we render RED.
+- Tower's `receipt.json`: every claim it carries data for is checked, and any failure is RED. A missing piece can only make the result AMBER after every available check has passed.
 - The vendored `jszip.min.js`: provenance locked in `vendor/vendor-lock.json` with the upstream URL and SHA-256. Run `scripts/verify-vendor.sh` to re-verify.
 
 ### Not trusted
 
-- Anything fetched at verification time. For confirmed entries, the verifier makes ZERO network calls — the bundled block header is sufficient.
-- Block explorers (mempool.space, blockstream.info, etc.). The verifier does not consult them for confirmed entries. If a future amber-state verification needs explorer lookup, the verifier will say so explicitly.
+- Anything fetched at verification time. The verifier makes no network calls at all (CSP `connect-src 'none'`).
+- Block explorers. The verifier never consults one; a green result links one for the main-chain check the verifier cannot do offline (see below).
 - The Tower's API. The verifier never calls Tower.
 
 ## Threats this verifier defends against
 
+Each row is pinned by vectors in `test-vectors/` (`expected.json` names the outcome code the verifier must return; `test/run.js` fails if any outcome code has no vector).
+
 | # | Threat | Mitigation |
 |---|--------|------------|
-| 1 | Forged receipt with tampered entry text | Step A re-hashes the text and compares to `hashes.hash_text`; any mismatch → RED |
-| 2 | Forged Merkle proof leading to a fake root | Step C walks the proof using Tower's locked hex-concat convention; any mismatch → RED |
-| 3 | Forged OTS proof claiming a Bitcoin attestation | Step D parses the OTS proof's binary tree, walks ops to derive the attestation's final hash, verifies the bundled block header's merkle_root field matches |
-| 4 | Forged block header | The header is SHA-256d locally to derive the block hash; if `receipt.bitcoin.block_hash` is claimed, must match |
-| 5 | Calendar-only OTS proof (Bitcoin confirmation not yet captured) | Renders AMBER, never GREEN. User instructed to re-download |
-| 6 | Pre-batch receipt (no anchor yet) | Renders AMBER with clear remediation |
-| 7 | ZIP-bomb DoS via crafted small ZIP | Hard caps: 50 MB compressed, 25 MB per file, 20 entries |
-| 8 | Path-traversal / XSS via crafted filenames | Filename allowlist + safe-character regex; `textContent` only — no `innerHTML` |
-| 9 | Malicious CDN serving a compromised script | All JS is vendored. No remote loads. CSP `default-src 'none'; script-src 'self'` |
-| 10 | Compromised SubtleCrypto in the browser | Self-test on a known SHA-256 vector at load; abort on mismatch |
+| 1 | Text swapped over a real anchor | Link 1: the text shown must hash to `hash_text` (`A-plain` / `A-salted`); link 2: `hash_text`, timestamp and identity must hash to `hash_bound`. Either failing is RED |
+| 2 | A tier claim that skips the text check (e.g. "sealed" over visible text, "tomb" over ordinary text) | Tier and marker are checked first; the content rule is fixed by the tier, and a rule stated for the wrong tier is RED |
+| 3 | A leaf the receipt cannot explain (bound over the text, `hash_bound == hash_text`, bound over the literal `[SEALED]`) | Only `B-hash` and `B-v3` are implemented; anything else is RED. Two pinned early entries whose binding was never recorded are AMBER, never green |
+| 4 | Pipe or salt boundary shifts, a hash posing as text | Fields are format-checked before hashing (exact 64-hex, exact millisecond UTC timestamp, hex or decimal identity, no NUL); `B-v3` and `A-salted` inputs are NUL-separated and domain-labelled, so they cannot equal a `B-hash` input |
+| 5 | Forged Merkle proof | Link 3 walks the path with Tower's hex-concat convention; mismatch is RED |
+| 6 | Forged or mismatched OTS proof | Link 4 parses the proof inline, bounded (4096-byte message, 10000 ops, 256 forks), and requires the attestation at the receipt's stated height to end at the header's Merkle root. A stated block with a pending-only proof is RED |
+| 7 | Forged block header (easy self-declared bits, early-chain or pre-launch header, bad nonce) | Link 5: pinned minimum height, absolute target ceiling and minimum date, then `sha256d(header)` at or below its own target; a stated `block_hash` must match |
+| 8 | Incomplete receipt shown as proven | Not batched, OTS pending, no OTS or header, identity withheld, Treasure envelope missing: AMBER, never GREEN, and only after every available link has passed |
+| 9 | Hidden carve presented as verified content | A Sealed / Time Capsule receipt showing only `[SEALED]` is labelled "commitment anchored, content hidden" and claims no content; the receipt's `created_at` is never shown as a proven date |
+| 10 | ZIP-bomb DoS | Hard caps: 50 MB compressed, 25 MB per file, 20 entries |
+| 11 | Path traversal / XSS via crafted filenames or receipt strings | Filename allowlist + safe-character regex; every receipt string is inserted with `textContent`, never as HTML |
+| 12 | Malicious CDN or exfiltration | All JS vendored or local; CSP `default-src 'none'; script-src 'self'; connect-src 'none'`; owner plaintext and key files never leave the page |
+| 13 | Compromised SubtleCrypto | Self-test on a known SHA-256 vector; abort on mismatch |
 
 ## Threats this verifier explicitly does NOT defend against
 
 - **Compromised verifier repo.** If an attacker pushes a malicious commit to `neillgroom/tower-verifier`, anyone running the live `neillgroom.github.io/tower-verifier` version would run their code. Mitigation: every release lists vendor SHA-256s in `CHANGELOG.md`. Power users clone the repo at a known-good tag and run `scripts/verify-vendor.sh`.
 - **Phishing a fake verifier URL.** A user who runs a copy of this code on `tower-verifier-totally-real.com` is trusting that site. Mitigation: the live UI displays its own `window.location.href` so users can confirm the URL matches the one printed in their receipt's `README.txt`. Always cross-check.
-- **Decryption of sealed-tier plaintext.** The verifier proves a *hash* was anchored to Bitcoin. For Sealed/Tomb tier entries, decryption of the ciphertext requires the user's key — which The Tower never holds. The verifier proves the carve happened; it does not prove what was carved.
-- **The block hash is for a real Bitcoin block.** The verifier confirms the bundled 80-byte header SHA-256d's to a specific hash. It does NOT confirm that hash exists in the longest Bitcoin chain. For complete certainty, look the block hash up in a block explorer or local Bitcoin node — the verifier's UI links you to mempool.space for GREEN results. (A fabricated header would still need to satisfy Bitcoin's proof-of-work difficulty, which is computationally infeasible for any attacker without an enormous mining budget — but if you want certainty, do the explorer cross-check.)
+- **The content of an unrevealed sealed carve.** For Sealed and Time Capsule entries the verifier proves a commitment was anchored. It proves what was carved only when the owner supplies the plaintext (and salt or key file), checked locally.
+- **Main-chain membership.** Offline, a green result proves the bundled header carries real launch-era Bitcoin work: its target is at or below a ceiling pinned from the real blocks The Tower has anchored, its height and date are at or after The Tower's first anchor, and its hash meets its own target. It does NOT prove the block is in the main Bitcoin chain. Confirm that with the explorer link on a green result, or your own node. Forging a header that passes would need mining a block at real Bitcoin difficulty.
+- **Who carved a public receipt.** Public receipts withhold the carver's identity, so link 2 cannot be checked on them; they are AMBER. Only the owner's own receipt can be green.
 
 ## Reproducible builds
 
