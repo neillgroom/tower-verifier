@@ -125,8 +125,10 @@ hash_text = sha256_hex( "tower" 00 "commit" 00 "v1" 00 salt 00 utf8(plaintext) )
   `hashes.commit_salt` (after reveal, when the text is shown) or from the
   owner (typed, or the `commit_salt` field of the `tower-sealed-key-v1` key
   file, which c3 adds next to `key_hex`).
-- A revealed salted receipt (tier sealed/tomb, ordinary text shown) with no
+- A revealed salted receipt (tier `sealed`, ordinary text shown) with no
   salt is red (`R_SALT_MISSING`): the text shown cannot be tied to the anchor.
+  Only `sealed` can be revealed; a `tomb` showing ordinary text is a tier and
+  marker contradiction (`R_TIER_MARKER`).
 
 ## A-envelope (protocol 3; tier treasure)
 
@@ -141,7 +143,7 @@ The proof ZIP carries `envelope.json`. Shown text is exactly `[TREASURE]`.
 | Tier | Shown text |
 |---|---|
 | open | not `[SEALED]`, not `[TREASURE]` |
-| sealed | `[SEALED]` (hidden) or ordinary text (revealed); never `[TREASURE]` |
+| sealed | `[SEALED]` (hidden) or ordinary text (revealed); never `[TREASURE]`. The only tier that can be revealed |
 | tomb | exactly `[SEALED]` |
 | treasure | exactly `[TREASURE]` |
 
@@ -178,25 +180,30 @@ not yet batched (amber). An unbatched receipt that states `btc_block`,
   attestations is red (`R_OTS`), not amber: the claim is false. The same
   holds for a stated `block_hash`. When several Bitcoin attestations sit at the
   stated height, the one ending at the header's Merkle root is used.
-- The proof must end exactly where the timestamp tree ends, and each
-  attestation payload must be consumed exactly; trailing bytes are red.
+- The proof is read by the strict OpenTimestamps grammar: a timestamp is
+  `(0xff item)* item`; an item is `0x00 attestation` or `op [argument]
+  timestamp`; an item never starts with `0xff`; sibling items of one timestamp
+  are never identical. Varints are canonical (no redundant trailing byte) and
+  a Bitcoin height is at most 4294967295. The proof must end exactly where
+  the timestamp tree ends, and each attestation payload must be consumed
+  exactly. Any violation is red (`R_OTS`).
   Supported ops: append (0xf0), prepend (0xf1), SHA-256 (0x08). SHA-1 (0x02)
   and RIPEMD160 (0x03) are red: Tower's proofs never use them.
-- `btc-block-header.bin`, when present, must be exactly 80 bytes.
-- The header is real when, in this order:
-  1. the claimed height (`btc_block`, else the lowest attested height) is at
-     least `MIN_ANCHOR_HEIGHT = 940842` (`R_HEADER_HEIGHT`);
-  2. the header's own target, decoded from its `bits`, is at most
-     `MAX_TARGET` (`R_HEADER_WORK`). `MAX_TARGET` is four times the easiest
-     target among the twelve real headers Tower has anchored, the same for
-     every height;
-  3. the header timestamp (bytes 68-71) is at least `MIN_HEADER_TIME`
-     (`R_HEADER_TIME`);
-  4. `sha256d(header)`, read as a little-endian number, is at most its own
-     target (`R_HEADER_POW`);
-  5. the 80 bytes in `btc-block-header.bin`, when present, equal
-     `block_header_hex`, and the computed block hash equals `bitcoin.block_hash`
-     when stated (`R_HEADER`).
+- Header checks run in the code's order:
+  1. a stated `btc_block` is at least `MIN_ANCHOR_HEIGHT = 940842`
+     (`R_HEADER_HEIGHT`);
+  2. `btc-block-header.bin`, when present, is exactly 80 bytes (`R_HEADER`);
+  3. it equals `block_header_hex` byte for byte (`R_HEADER`); a header file
+     with no `block_header_hex` is red (`R_FIELD_FORMAT`);
+  4. the header is real: the height is at least `MIN_ANCHOR_HEIGHT`
+     (`R_HEADER_HEIGHT`); the target decoded from its `bits` is at most
+     `MAX_TARGET` (`R_HEADER_WORK`), four times the easiest target among the
+     twelve real headers Tower has anchored, the same at every height; its
+     timestamp (bytes 68-71) is at least `MIN_HEADER_TIME` (`R_HEADER_TIME`);
+     `sha256d(header)`, read little-endian, is at most its own target
+     (`R_HEADER_POW`);
+  5. the computed block hash equals `bitcoin.block_hash` when stated
+     (`R_HEADER`).
   Then the OTS attestation's message must equal header bytes 36-67 byte for
   byte (`R_OTS`).
 - `scripts/derive-header-constants.js` recomputes the three constants from
@@ -208,13 +215,17 @@ chain; the result links the block on a public explorer for that one-click
 check. Forging a header that passes would need mining a block at real
 Bitcoin difficulty (at today's difficulty, roughly the cost of one block).
 
-## Owner input
+## Owner input (core API only)
 
-The owner may supply a plaintext and a salt (typed, or from the key file).
-On a hidden receipt (`[SEALED]`) they are checked by link 1. On a receipt
-that shows its text they must agree with it: a different plaintext, a salt
-different from `commit_salt`, or any salt on an `A-plain` entry is red
-(`R_CONTENT_MISMATCH`).
+`verifyReceiptArtifacts` accepts `owner: { plaintext, salt }`. The page does
+not offer it in this version; the owner checks content with The Tower's
+decrypt page. In the core: on a hidden receipt (`[SEALED]`) the plaintext
+(and salt, for `A-salted`) is checked by link 1. Any owner input that is
+supplied but cannot be checked is red (`R_CONTENT_MISMATCH`): a salt without
+a plaintext, any input on a Treasure (`A-envelope`) receipt, any input on a
+receipt that withholds `hash_text`, a salt on an `A-plain` entry. On a
+receipt that shows its text the input must agree with it: a different
+plaintext or a salt different from `commit_salt` is red.
 
 ## Outcome codes
 

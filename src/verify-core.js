@@ -402,7 +402,8 @@ function parseReceipt(receipt, owner, envelopeBytes) {
     }
 
     // Bitcoin.
-    const b = isObj(receipt.bitcoin) ? receipt.bitcoin : {};
+    if (!absent(receipt.bitcoin) && !isObj(receipt.bitcoin)) return bad('R_FIELD_FORMAT', 'receipt.bitcoin is not a JSON object');
+    const b = absent(receipt.bitcoin) ? {} : receipt.bitcoin;
     let btcBlock = null;
     if (!absent(b.btc_block)) {
         btcBlock = parseHeight(b.btc_block);
@@ -557,6 +558,7 @@ class OtsReader {
             const b = this.readByte();
             value += (b & 0x7f) * Math.pow(2, shift);
             if ((b & 0x80) === 0) {
+                if (b === 0 && i > 0) throw new Error('non-canonical varint (redundant trailing byte)');
                 if (!Number.isSafeInteger(value)) throw new Error('varint exceeds safe integer range');
                 return value;
             }
@@ -595,40 +597,75 @@ async function applyOp(reader, opCode, currentHash) {
     throw new Error(`unknown op code 0x${opCode.toString(16)}`);
 }
 
-// Walk one timestamp: ops, forks (each fork parses one full sub-timestamp
-// from the same message, then this one continues), ending at an attestation.
+// OpenTimestamps serialization, read strictly:
+//   timestamp := ( 0xff item )* item        every item but the last is
+//                                           preceded by one fork marker
+//   item      := 0x00 attestation           a leaf
+//              | op [argument] timestamp    an operation and what follows it
+// An item never starts with 0xff, and no two sibling items of one timestamp
+// may be identical (same attestation, or same op with the same argument).
+// A trailing op chain is walked in a loop, so only forks nest.
+function readAttestation(reader, currentHash, attestations, seen) {
+    const start = reader.pos;
+    const tagHex = bytesToHex(reader.readBytes(8));
+    const payloadLen = reader.readVarint();
+    if (payloadLen > 8192) throw new Error('OTS attestation payload too large');
+    const payload = reader.readBytes(payloadLen);
+    const key = '00' + bytesToHex(reader.bytes.subarray(start, reader.pos));
+    if (seen.has(key)) throw new Error('OTS proof repeats an attestation on the same message');
+    seen.add(key);
+    if (tagHex === ATTESTATION_TAG_BITCOIN) {
+        const sub = new OtsReader(payload);
+        const height = sub.readVarint();
+        if (!sub.eof()) throw new Error('OTS Bitcoin attestation payload has trailing bytes');
+        if (height > 0xffffffff) throw new Error(`OTS Bitcoin attestation height ${height} is above 4294967295`);
+        attestations.push({ type: 'bitcoin', blockHeight: height, finalHash: new Uint8Array(currentHash) });
+    } else if (tagHex === ATTESTATION_TAG_PENDING) {
+        const sub = new OtsReader(payload);
+        const url = new TextDecoder().decode(sub.readBytes(sub.readVarint()));
+        if (!sub.eof()) throw new Error('OTS pending attestation payload has trailing bytes');
+        attestations.push({ type: 'pending', url, finalHash: new Uint8Array(currentHash) });
+    } else {
+        attestations.push({ type: 'unknown', tagHex, finalHash: new Uint8Array(currentHash) });
+    }
+}
+
+// Apply one op item's operation; returns the new message. The op byte and
+// its argument form the sibling key.
+async function readOp(reader, opCode, currentHash, seen) {
+    const start = reader.pos;
+    const out = await applyOp(reader, opCode, currentHash);
+    const key = opCode.toString(16).padStart(2, '0') + bytesToHex(reader.bytes.subarray(start, reader.pos));
+    if (seen.has(key)) throw new Error('OTS proof repeats an operation on the same message');
+    seen.add(key);
+    return out;
+}
+
 async function walkOtsTree(reader, currentHash, attestations, depth) {
     if (depth > OTS_MAX_DEPTH) throw new Error(`OTS proof nests more than ${OTS_MAX_DEPTH} forks`);
-    while (!reader.eof()) {
+    let seen = new Set();
+    for (;;) {
         const tag = reader.readByte();
         if (tag === OP_FORK) {
             if (++reader.ops > OTS_MAX_OPS) throw new Error(`OTS proof has more than ${OTS_MAX_OPS} operations`);
-            await walkOtsTree(reader, currentHash, attestations, depth + 1);
+            const first = reader.readByte();
+            if (first === OP_FORK) throw new Error('OTS item starts with a fork marker');
+            if (first === ATTESTATION_MARKER) {
+                readAttestation(reader, currentHash, attestations, seen);
+            } else {
+                const next = await readOp(reader, first, currentHash, seen);
+                await walkOtsTree(reader, next, attestations, depth + 1);
+            }
             continue;
         }
+        // The last item of this timestamp.
         if (tag === ATTESTATION_MARKER) {
-            const tagHex = bytesToHex(reader.readBytes(8));
-            const payloadLen = reader.readVarint();
-            if (payloadLen > 8192) throw new Error('OTS attestation payload too large');
-            const payload = reader.readBytes(payloadLen);
-            if (tagHex === ATTESTATION_TAG_BITCOIN) {
-                const sub = new OtsReader(payload);
-                const height = sub.readVarint();
-                if (!sub.eof()) throw new Error('OTS Bitcoin attestation payload has trailing bytes');
-                attestations.push({ type: 'bitcoin', blockHeight: height, finalHash: new Uint8Array(currentHash) });
-            } else if (tagHex === ATTESTATION_TAG_PENDING) {
-                const sub = new OtsReader(payload);
-                const url = new TextDecoder().decode(sub.readBytes(sub.readVarint()));
-                if (!sub.eof()) throw new Error('OTS pending attestation payload has trailing bytes');
-                attestations.push({ type: 'pending', url, finalHash: new Uint8Array(currentHash) });
-            } else {
-                attestations.push({ type: 'unknown', tagHex, finalHash: new Uint8Array(currentHash) });
-            }
+            readAttestation(reader, currentHash, attestations, seen);
             return;
         }
-        currentHash = await applyOp(reader, tag, currentHash);
+        currentHash = await readOp(reader, tag, currentHash, seen);
+        seen = new Set(); // the op's own timestamp starts here
     }
-    throw new Error('OTS proof ends before an attestation');
 }
 
 async function parseOtsProof(otsBytes, initialHashHex) {
@@ -791,6 +828,19 @@ async function verifyReceiptArtifacts(input, options) {
 
     const ambers = [];
     let provenContent = null; // what the page may print as proven
+
+    // Owner input that is supplied but cannot be checked is red, never
+    // silently skipped.
+    const ownerGiven = r.ownerPlaintext !== null || r.ownerSalt !== null;
+    if (ownerGiven && contentRule === 'A-envelope') {
+        return red('R_CONTENT_MISMATCH', 'link-1 content', 'a plaintext or salt was supplied, but a Treasure entry is checked by its envelope.json only');
+    }
+    if (ownerGiven && r.hashText === null) {
+        return red('R_CONTENT_MISMATCH', 'link-1 content', 'a plaintext or salt was supplied, but this receipt withholds hash_text, so it cannot be checked');
+    }
+    if (hidden && r.ownerSalt !== null && r.ownerPlaintext === null) {
+        return red('R_CONTENT_MISMATCH', 'link-1 content', 'a salt was supplied without the plaintext, so it cannot be checked');
+    }
 
     // Link 1 — content to commitment.
     if (contentRule === 'A-envelope') {

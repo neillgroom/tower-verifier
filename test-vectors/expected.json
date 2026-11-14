@@ -837,5 +837,100 @@
   "code": "G_CONTENT",
   "desc": "OTS: two Bitcoin attestations at the claimed height; the one ending at the header is used",
   "testPolicy": true
+ },
+ {
+  "name": "owner-salt-only-hidden",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "hidden salted receipt + an owner salt with no plaintext",
+  "owner": {
+   "salt": "66c737db5f67fdd09273a03a6dc911d85d262ad87974037fef1d4832d4f47f54"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "owner-input-on-withheld",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "public receipt with hash_text withheld + owner plaintext and salt: cannot be checked",
+  "owner": {
+   "plaintext": "A sealed thought nobody else may read until reveal.",
+   "salt": "66c737db5f67fdd09273a03a6dc911d85d262ad87974037fef1d4832d4f47f54"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "owner-plaintext-on-treasure",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "Treasure + owner plaintext: A-envelope takes no plaintext",
+  "owner": {
+   "plaintext": "anything"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "owner-salt-on-treasure",
+  "overall": "red",
+  "code": "R_CONTENT_MISMATCH",
+  "desc": "Treasure + owner salt: A-envelope takes no salt",
+  "owner": {
+   "salt": "66c737db5f67fdd09273a03a6dc911d85d262ad87974037fef1d4832d4f47f54"
+  },
+  "testPolicy": true
+ },
+ {
+  "name": "forged-ots-fork-of-fork",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "OTS: 0xff followed directly by another 0xff (an item cannot start with a fork marker)",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-ots-duplicate-attestation",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "OTS: the same attestation twice on one message",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-ots-duplicate-op",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "OTS: the same op (sha256) twice as siblings",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-ots-dangling-fork",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "OTS: a fork marker before the last item",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-ots-noncanonical-height",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "OTS: Bitcoin height encoded with a redundant trailing varint byte",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-ots-height-overflow",
+  "overall": "red",
+  "code": "R_OTS",
+  "desc": "OTS: Bitcoin height 2^32 (above any uint32 height)",
+  "testPolicy": true
+ },
+ {
+  "name": "forged-bitcoin-not-object",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "receipt.bitcoin is an array"
+ },
+ {
+  "name": "forged-bitcoin-string",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "receipt.bitcoin is a string"
  }
 ]

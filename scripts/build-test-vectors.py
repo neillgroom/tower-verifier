@@ -796,6 +796,70 @@ rx = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
 add('ots-two-bitcoin-same-height', anchored_with(rx, ots_two_btc_same_height), 'green', 'G_CONTENT',
     'OTS: two Bitcoin attestations at the claimed height; the one ending at the header is used', test_policy=True)
 
+# ---------------------------------------------------------------- code board 2 repairs
+
+# Owner input that is supplied but cannot be checked is red, never skipped.
+add('owner-salt-only-hidden', anchored(v3_receipt('sealed', '[SEALED]', 'A-salted', SEALED_HT)), 'red',
+    'R_CONTENT_MISMATCH', 'hidden salted receipt + an owner salt with no plaintext', owner={'salt': SALT},
+    test_policy=True)
+add('owner-input-on-withheld', pub_files, 'red', 'R_CONTENT_MISMATCH',
+    'public receipt with hash_text withheld + owner plaintext and salt: cannot be checked',
+    owner={'plaintext': SECRET, 'salt': SALT}, test_policy=True)
+tre = v3_receipt('treasure', '[TREASURE]', 'A-envelope', TREAS_HT)
+add('owner-plaintext-on-treasure', anchored(clone(tre), extra={'envelope.json': ENVELOPE}), 'red',
+    'R_CONTENT_MISMATCH', 'Treasure + owner plaintext: A-envelope takes no plaintext',
+    owner={'plaintext': 'anything'}, test_policy=True)
+add('owner-salt-on-treasure', anchored(clone(tre), extra={'envelope.json': ENVELOPE}), 'red',
+    'R_CONTENT_MISMATCH', 'Treasure + owner salt: A-envelope takes no salt', owner={'salt': SALT}, test_policy=True)
+
+# OpenTimestamps grammar: a timestamp is one or more items; every item but
+# the last is preceded by 0xff; an item is an attestation (0x00 ...) or an
+# op followed by a timestamp. Siblings may not repeat.
+BTC_ATT = b'\x00' + TAG_BTC + varint(len(varint(SYN_HEIGHT))) + varint(SYN_HEIGHT)
+PEND_URL = b'https://alice.btc.calendar.opentimestamps.org'
+PEND_ATT = b'\x00' + TAG_PENDING + varint(len(varint(len(PEND_URL)) + PEND_URL)) + varint(len(PEND_URL)) + PEND_URL
+
+rx = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+add('forged-ots-fork-of-fork', anchored_with(clone(rx), lambda root: ots_header(root) + b'\xff\xff' + BTC_ATT + BTC_ATT + BTC_ATT),
+    'red', 'R_OTS', 'OTS: 0xff followed directly by another 0xff (an item cannot start with a fork marker)', test_policy=True)
+add('forged-ots-duplicate-attestation', anchored_with(clone(rx), lambda root: ots_header(root) + b'\xff' + BTC_ATT + BTC_ATT),
+    'red', 'R_OTS', 'OTS: the same attestation twice on one message', test_policy=True)
+add('forged-ots-duplicate-op', anchored_with(clone(rx), lambda root: ots_header(root) + b'\xff\x08' + PEND_ATT + b'\xff\x08' + PEND_ATT + BTC_ATT),
+    'red', 'R_OTS', 'OTS: the same op (sha256) twice as siblings', test_policy=True)
+add('forged-ots-dangling-fork', anchored_with(clone(rx), lambda root: ots_header(root) + b'\xff' + BTC_ATT),
+    'red', 'R_OTS', 'OTS: a fork marker before the last item', test_policy=True)
+
+
+# Bitcoin attestation heights: canonical varint, at most 2^32 - 1.
+def btc_att_raw(height_bytes):
+    return b'\x00' + TAG_BTC + varint(len(height_bytes)) + height_bytes
+
+
+noncanon = bytearray(varint(SYN_HEIGHT))
+noncanon[-1] |= 0x80
+noncanon = bytes(noncanon) + b'\x00'
+add('forged-ots-noncanonical-height', anchored_with(clone(rx), lambda root: ots_header(root) + btc_att_raw(noncanon)),
+    'red', 'R_OTS', 'OTS: Bitcoin height encoded with a redundant trailing varint byte', test_policy=True)
+
+
+def no_anchor_fields(r):
+    r['bitcoin'].update(btc_block=None, block_hash=None, block_header_hex=None)
+
+
+rbig = clone(rx)
+files = anchored_with(rbig, lambda root: ots_header(root) + btc_att_raw(varint(1 << 32)))
+rbig2 = json.loads(files['receipt.json'])
+no_anchor_fields(rbig2)
+files['receipt.json'] = dump(rbig2)
+files.pop('btc-block-header.bin')
+add('forged-ots-height-overflow', files, 'red', 'R_OTS', 'OTS: Bitcoin height 2^32 (above any uint32 height)', test_policy=True)
+
+# Non-object receipt sections are field-format red, never coerced.
+files, _ = real3_with(lambda r: r.__setitem__('bitcoin', ['x']), drop=('btc-block-header.bin',))
+add('forged-bitcoin-not-object', files, 'red', 'R_FIELD_FORMAT', 'receipt.bitcoin is an array')
+files, _ = real3_with(lambda r: r.__setitem__('bitcoin', 'confirmed'), drop=('btc-block-header.bin',))
+add('forged-bitcoin-string', files, 'red', 'R_FIELD_FORMAT', 'receipt.bitcoin is a string')
+
 # ---------------------------------------------------------------- pinned format vectors
 
 fv = {
