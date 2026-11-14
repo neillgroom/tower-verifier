@@ -177,6 +177,21 @@ async function main() {
     check(st.overall === 'red' && st.code === 'R_SELFTEST', `broken SubtleCrypto -> red/R_SELFTEST (got ${st.overall}/${st.code})`);
     seenCodes.add('R_SELFTEST');
 
+    // Owner panel: only a hidden sealed/tomb receipt that carries hash_text.
+    const H64 = 'a'.repeat(64);
+    const oc = (entry, hashes, version = '1.2') => core.ownerCheckApplies({ version, entry, hashes });
+    check(typeof core.ownerCheckApplies === 'function', 'core exports ownerCheckApplies');
+    if (typeof core.ownerCheckApplies === 'function') {
+        check(oc({ text: '[SEALED]', tier: 'sealed' }, { hash_text: H64 }) === true, 'owner check: hidden sealed with hash_text');
+        check(oc({ text: '[SEALED]', tier: 'tomb' }, { hash_text: H64 }) === true, 'owner check: hidden tomb with hash_text');
+        check(oc({ text: '[SEALED]' }, { hash_text: H64 }) === true, 'owner check: legacy hidden receipt without a tier');
+        check(oc({ text: 'revealed words', tier: 'sealed' }, { hash_text: H64 }) === false, 'owner check: not on a revealed receipt');
+        check(oc({ text: '[SEALED]', tier: 'sealed' }, {}) === false, 'owner check: not when hash_text is withheld');
+        check(oc({ text: '[SEALED]', tier: 'open' }, { hash_text: H64 }) === false, 'owner check: not on an Open receipt');
+        check(oc({ text: '[TREASURE]', tier: 'treasure' }, { hash_text: H64 }) === false, 'owner check: not on Treasure');
+        check(core.ownerCheckApplies(null) === false, 'owner check: not on a missing receipt');
+    }
+
     // Labels: every code has one; only the content-bearing greens say VERIFIED.
     for (const [code, colour] of Object.entries(core.OUTCOME_CODES)) {
         const label = core.outcomeLabel(code);

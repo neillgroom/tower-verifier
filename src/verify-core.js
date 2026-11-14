@@ -992,12 +992,27 @@ async function verifyReceiptArtifacts(input, options) {
     return finish(code, SUMMARIES[code] + residual, { ambers: [], provenContent, ...anchorExtra, ...stated });
 }
 
+// The owner check applies only to a hidden Sealed / Time Capsule receipt
+// that carries its commitment: text exactly [SEALED], tier sealed or tomb
+// (a legacy receipt without a tier and with [SEALED] text is sealed), and a
+// 64-hex hash_text. Revealed receipts and receipts with hash_text withheld
+// get no owner panel.
+function ownerCheckApplies(receipt) {
+    if (!isObj(receipt) || !isObj(receipt.entry) || !isObj(receipt.hashes)) return false;
+    const e = receipt.entry;
+    if (e.text !== SEALED_MARKER) return false;
+    const tier = absent(e.tier) && receipt.version === LEGACY_RECEIPT_VERSION ? 'sealed' : e.tier;
+    if (tier !== 'sealed' && tier !== 'tomb') return false;
+    return typeof receipt.hashes.hash_text === 'string' && HEX64.test(receipt.hashes.hash_text);
+}
+
 // Exports for browser (script global) and Node (CommonJS) — works in both.
 const api = {
     LEGACY_RECEIPT_VERSION,
     V3_RECEIPT_VERSION,
     OUTCOME_CODES,
     outcomeLabel,
+    ownerCheckApplies,
     MIN_ANCHOR_HEIGHT,
     MAX_TARGET,
     MIN_HEADER_TIME,

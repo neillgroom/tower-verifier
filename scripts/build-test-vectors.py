@@ -13,7 +13,8 @@ mismatch between the document and the verifier shows up as failing vectors.
 Inputs (all committed):
   test-vectors/real-entry-3.zip      genuine Open receipt + batch 2 OTS + header
   test-vectors/sealed-entry-4.zip    genuine Sealed owner receipt, same batch
-  test-vectors/captured/entry-*.json genuine public receipts (see README.md)
+  test-vectors/captured/entry-*.json genuine public receipts, saved byte for byte
+                                     from https://thetower.one/api/proof/by-hash/<hash_bound>
   test-vectors/anchored-headers.json real headers of every anchored block
   test-vectors/block-1-header.hex    real Bitcoin block 1 header
 
@@ -244,7 +245,8 @@ manifest.append({'name': 'sealed-entry-4', 'overall': 'green', 'code': 'G_HIDDEN
                  'link2': 'B-hash',
                  'desc': 'Genuine Sealed owner ZIP: commitment anchored, content hidden'})
 
-# Captured public receipts (genuine bytes; see test-vectors/README.md).
+# Captured public receipts (genuine bytes, fetched read-only from
+# https://thetower.one/api/proof/by-hash/<hash_bound>; see the docstring).
 for path in sorted(CAPTURED.glob('entry-*.json'), key=lambda p: int(p.stem.split('-')[1])):
     raw = path.read_bytes()
     r = json.loads(raw)

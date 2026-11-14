@@ -1,6 +1,6 @@
 /* Tower Verifier — distinctive monolithic obsidian aesthetic. */
 
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* No web fonts: the page makes no network requests (CSP default-src 'none'). */
 
 :root {
     --bg: #0a0a0d;

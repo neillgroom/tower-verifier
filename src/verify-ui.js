@@ -29,6 +29,11 @@
 
     // The receipt currently loaded, so the owner panel can re-verify it.
     let current = null;
+    // Every ZIP selection and every owner check takes a new generation; a
+    // run that finishes after a newer one started is discarded, success or
+    // error alike.
+    let generation = 0;
+    const isStale = (gen) => gen !== generation;
 
     // The label text comes from the core (result.label), so the
     // hidden-commitment green can never be shown as plain "VERIFIED".
@@ -68,7 +73,9 @@
             addRow(facts, 'Proven date', `${result.blockTime} — the Bitcoin block's own timestamp (block ${result.blockHeight})`);
         }
         if (result.statedCreatedAt) {
-            addRow(facts, 'Carve time stated by the receipt', `${result.statedCreatedAt} (bound into the leaf; the block date above is the proof)`);
+            addRow(facts, 'Carve time stated by the receipt', result.blockTime
+                ? `${result.statedCreatedAt} (bound into the leaf; the block date above is the proof)`
+                : `${result.statedCreatedAt} (bound into the leaf; the anchor date is not yet proven)`);
         }
         out.appendChild(facts);
 
@@ -101,20 +108,27 @@
         out.appendChild(stepsBox);
 
         // Content. Only content the verifier proved is presented as proven.
-        const entryId = receipt && receipt.entry ? receipt.entry.id : '?';
-        if (result.overall === 'green' && typeof result.provenContent === 'string') {
+        // Only an entry id the core validated (a positive integer) is shown.
+        const entryId = Number.isSafeInteger(result.entryId) ? `#${result.entryId}` : '(id not validated)';
+        if (result.code === 'G_ENVELOPE') {
             const box = el('div', 'entry-text');
-            box.appendChild(el('h4', null, `Entry #${entryId} — proven content`));
+            box.appendChild(el('h4', null, `Entry ${entryId} — Treasure envelope proven`));
+            box.appendChild(el('p', 'subtle', 'The envelope.json in this ZIP is the envelope anchored. Its contents stay sealed; nothing beyond the envelope bytes is claimed.'));
+            out.appendChild(box);
+        } else if (result.overall === 'green' && typeof result.provenContent === 'string') {
+            const box = el('div', 'entry-text');
+            box.appendChild(el('h4', null, `Entry ${entryId} — proven content`));
             box.appendChild(el('pre', null, result.provenContent));
             out.appendChild(box);
         } else if (result.code === 'G_HIDDEN') {
             const box = el('div', 'entry-text');
-            box.appendChild(el('h4', null, `Entry #${entryId} — content hidden`));
+            box.appendChild(el('h4', null, `Entry ${entryId} — content hidden`));
             box.appendChild(el('p', 'subtle', 'No content is shown, so none is claimed. The owner can check their plaintext below; it never leaves this page.'));
             out.appendChild(box);
-        } else if (receipt && receipt.entry && typeof receipt.entry.text === 'string') {
+        } else if (receipt && receipt.entry && typeof receipt.entry.text === 'string'
+            && receipt.entry.text !== core.SEALED_MARKER && receipt.entry.text !== core.TREASURE_MARKER) {
             const box = el('div', 'entry-text unproven');
-            box.appendChild(el('h4', null, `Entry #${entryId} — text in the receipt (NOT proven)`));
+            box.appendChild(el('h4', null, `Entry ${entryId} — text in the receipt (NOT proven)`));
             box.appendChild(el('pre', null, receipt.entry.text));
             out.appendChild(box);
         }
@@ -128,12 +142,11 @@
     function renderOwnerPanel(receipt) {
         const panel = $('ownerBox');
         if (!panel) return;
-        const tier = receipt && receipt.entry && receipt.entry.tier;
-        const hiddenText = receipt && receipt.entry && receipt.entry.text === core.SEALED_MARKER;
-        panel.hidden = !(hiddenText || tier === 'sealed' || tier === 'tomb');
+        panel.hidden = !core.ownerCheckApplies(receipt);
     }
 
     function renderError(message) {
+        if ($('ownerBox')) $('ownerBox').hidden = true;
         const out = $('result');
         out.replaceChildren();
         const light = el('div', 'traffic-light');
@@ -162,6 +175,47 @@
     const TEXT_FILES = new Set(['receipt.json', 'README.txt', 'ciphertext-meta.json']);
     const SAFE_NAME = /^[a-zA-Z0-9._-]+$/;
 
+    // Inflate one entry, stopping as soon as the output passes the cap
+    // (a declared size can lie).
+    function inflateCapped(entry, name) {
+        return new Promise((resolve, reject) => {
+            const chunks = [];
+            let total = 0;
+            let done = false;
+            const stream = entry.internalStream('uint8array');
+            stream
+                .on('data', (chunk) => {
+                    if (done) return;
+                    total += chunk.length;
+                    if (total > MAX_FILE_BYTES) {
+                        done = true;
+                        stream.pause();
+                        reject(new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`));
+                        return;
+                    }
+                    chunks.push(chunk);
+                })
+                .on('error', (err) => {
+                    if (!done) {
+                        done = true;
+                        reject(err);
+                    }
+                })
+                .on('end', () => {
+                    if (done) return;
+                    done = true;
+                    const out = new Uint8Array(total);
+                    let off = 0;
+                    for (const c of chunks) {
+                        out.set(c, off);
+                        off += c.length;
+                    }
+                    resolve(out);
+                })
+                .resume();
+        });
+    }
+
     async function extractZip(file) {
         if (file.size > MAX_ZIP_BYTES) {
             throw new Error(`ZIP too large (${file.size} bytes; max ${MAX_ZIP_BYTES})`);
@@ -179,7 +233,10 @@
         let totalUncompressed = 0;
         for (const name of fileNames) {
             const meta = zip.files[name]?._data;
-            const size = (meta && Number(meta.uncompressedSize)) || 0;
+            const size = meta ? Number(meta.uncompressedSize) : NaN;
+            if (!Number.isSafeInteger(size) || size <= 0) {
+                throw new Error(`${name} does not declare a positive uncompressed size`);
+            }
             if (size > MAX_FILE_BYTES) {
                 throw new Error(`${name} declares ${size} bytes uncompressed (cap ${MAX_FILE_BYTES})`);
             }
@@ -196,16 +253,13 @@
             const entry = zip.files[name];
             // envelope.json is read as raw bytes: A-envelope hashes the
             // exact bytes in the ZIP, never a re-serialisation.
-            const bytes = await entry.async('uint8array');
-            if (bytes.length > MAX_FILE_BYTES) {
-                throw new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`);
-            }
+            const bytes = await inflateCapped(entry, name);
             result[name] = TEXT_FILES.has(name) ? new TextDecoder().decode(bytes) : bytes;
         }
         return result;
     }
 
-    async function runVerify(owner) {
+    async function runVerify(owner, gen) {
         const { receipt, contents } = current;
         const result = await core.verifyReceiptArtifacts({
             receipt,
@@ -214,21 +268,26 @@
             envelopeBytes: contents['envelope.json'] || null,
             owner: owner || null,
         });
+        if (isStale(gen)) return;
         renderResult(result, receipt);
     }
 
     async function handleZipFile(file) {
+        const gen = ++generation;
+        current = null;
         try {
             renderError('Extracting…');
             const contents = await extractZip(file);
+            if (isStale(gen)) return;
             if (!contents['receipt.json']) {
                 throw new Error('ZIP does not contain receipt.json');
             }
             const receipt = JSON.parse(contents['receipt.json']);
             current = { receipt, contents };
             clearOwnerInputs();
-            await runVerify(null);
+            await runVerify(null, gen);
         } catch (err) {
+            if (isStale(gen)) return;
             console.error(err);
             current = null;
             renderError(`Verification error: ${err.message}`);
@@ -272,6 +331,7 @@
 
     async function handleOwnerCheck() {
         if (!current) return;
+        const gen = ++generation;
         const note = $('ownerNote');
         note.textContent = '';
         let plaintext = $('ownerPlaintext').value;
@@ -290,10 +350,13 @@
                 }
             }
         } catch (err) {
+            if (isStale(gen)) return;
             note.textContent = `Key file: ${err.message}`;
             return;
         }
-        await runVerify({ plaintext, salt });
+        if (isStale(gen)) return;
+        await runVerify({ plaintext, salt }, gen);
+        return gen;
     }
 
     // ---- wiring -------------------------------------------------------
@@ -316,7 +379,9 @@
         if (file) handleZipFile(file);
     });
     if ($('ownerCheck')) $('ownerCheck').addEventListener('click', () => {
+        const started = generation + 1;
         handleOwnerCheck().catch((err) => {
+            if (isStale(started)) return;
             console.error(err);
             renderError(`Verification error: ${err.message}`);
         });
