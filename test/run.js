@@ -173,14 +173,17 @@ async function main() {
     want(await vin('v3-sealed-revealed', (i) => {
         i.receipt.identity = { redacted: true };
         delete i.receipt.hashes.hash_text;
+        delete i.receipt.hashes.binding_nonce;
     }), 'red', 'R_FIELD_FORMAT', 'public revealed sealed receipt may not withhold hash_text');
     want(await vin('v3-treasure-envelope', (i) => {
         i.receipt.identity = { redacted: true };
         delete i.receipt.hashes.hash_text;
+        delete i.receipt.hashes.binding_nonce;
     }), 'red', 'R_CONTENT_MISMATCH', 'envelope.json with a receipt that withholds hash_text is red, not skipped');
     const noEnv = await vin('v3-treasure-envelope', (i) => {
         i.receipt.identity = { redacted: true };
         delete i.receipt.hashes.hash_text;
+        delete i.receipt.hashes.binding_nonce;
         i.envelopeBytes = null;
     });
     check(noEnv.overall === 'amber' && (noEnv.ambers || []).includes('A_TREASURE_NO_ENVELOPE'),
@@ -196,10 +199,11 @@ async function main() {
         'B-hash layout matches formats-vectors.json'
     );
     const v = fv['b-v3'];
-    check(core.bytesToHex(core.bindV3Input(v.tier, v.content_rule, v.hash_text, v.created_at, v.identity)) === v.input_hex,
-        'B-v3 input bytes match formats-vectors.json');
-    check((await core.bindV3(v.tier, v.content_rule, v.hash_text, v.created_at, v.identity)) === v.hash_bound,
+    check(core.bytesToHex(core.bindV3Input(v.nonce, v.tier, v.content_rule, v.hash_text, v.created_at, v.identity)) === v.input_hex,
+        'B-v3 input bytes (with the binding nonce) match formats-vectors.json');
+    check((await core.bindV3(v.nonce, v.tier, v.content_rule, v.hash_text, v.created_at, v.identity)) === v.hash_bound,
         'B-v3 hash matches formats-vectors.json');
+    check(/^[0-9a-f]{64}$/.test(v.nonce), 'pinned B-v3 vector carries a 64-hex nonce');
     const s = fv['a-salted'];
     check(core.bytesToHex(core.commitSaltedInput(s.salt, s.plaintext)) === s.input_hex,
         'A-salted input bytes match formats-vectors.json');

@@ -16,6 +16,7 @@ Green now means every piece of content the receipt shows is tied, link by link, 
 - Entries 58 and 59 (binding never recorded) are pinned amber `A_BINDING_UNRECORDED`, never green.
 - Hidden Sealed / Time Capsule with no plaintext: green `G_HIDDEN`, labelled "COMMITMENT ANCHORED — CONTENT HIDDEN", never plain "VERIFIED".
 - Receipt version 1.3 / protocol 3 (`B-v3`, `A-salted`, `A-envelope`) accepted ahead of the server producing it.
+- `B-v3` binds a per-carve secret `binding_nonce` (64 hex) first, so a public `hash_text` and timestamp cannot be used to search for the carver's identity. The nonce is on the owner's receipt only; a public receipt carrying it is red.
 - Each result has a stable outcome code and a label, and names the link-1 and link-2 rules evaluated.
 
 ### Removed claims

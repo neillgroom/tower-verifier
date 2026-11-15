@@ -246,13 +246,17 @@ async function bindHash(hashText, createdAt, identity) {
     return sha256Hex(hashText + '|' + createdAt + '|' + identity);
 }
 
-// B-v3: sha256("tower" 00 "bound" 00 "v3" 00 tier 00 content_rule 00
+// B-v3: sha256("tower" 00 "bound" 00 "v4" 00 nonce 00 tier 00 content_rule 00
 //              hash_text 00 created_at 00 identity).
-function bindV3Input(tier, contentRule, hashText, createdAt, identity) {
-    return joinWithNul(['tower', 'bound', 'v3', tier, contentRule, hashText, createdAt, identity]);
+// nonce is a per-carve secret (64 lowercase hex, server CSPRNG) carried only
+// on the owner's receipt. Without it, a public hash_text and timestamp would
+// let anyone search the small identity space against hash_bound. Label "v4":
+// the unshipped nonce-less layout used "v3".
+function bindV3Input(nonce, tier, contentRule, hashText, createdAt, identity) {
+    return joinWithNul(['tower', 'bound', 'v4', nonce, tier, contentRule, hashText, createdAt, identity]);
 }
-async function bindV3(tier, contentRule, hashText, createdAt, identity) {
-    return sha256Hex(bindV3Input(tier, contentRule, hashText, createdAt, identity));
+async function bindV3(nonce, tier, contentRule, hashText, createdAt, identity) {
+    return sha256Hex(bindV3Input(nonce, tier, contentRule, hashText, createdAt, identity));
 }
 
 // A-salted: sha256("tower" 00 "commit" 00 "v1" 00 salt 00 utf8(plaintext)).
@@ -317,6 +321,9 @@ function parseReceipt(receipt, owner, envelopeBytes) {
             return bad('R_UNKNOWN_RULE', `legacy receipt states content_rule ${JSON.stringify(hashes.content_rule)}; only A-plain exists before protocol 3`);
         }
         boundRule = 'B-hash';
+        if (!absent(hashes.binding_nonce)) {
+            return bad('R_FIELD_FORMAT', 'a protocol 1/2 receipt never carries binding_nonce');
+        }
     } else {
         if (hashes.bound_rule !== 'B-v3') {
             return bad('R_UNKNOWN_RULE', `protocol 3 receipt must state bound_rule "B-v3" (got ${JSON.stringify(hashes.bound_rule ?? null)})`);
@@ -385,6 +392,19 @@ function parseReceipt(receipt, owner, envelopeBytes) {
     if (absent(commitSalt)) commitSalt = null;
     else if (typeof commitSalt !== 'string' || !HEX64.test(commitSalt)) {
         return bad('R_FIELD_FORMAT', 'hashes.commit_salt is not 64 lowercase hex characters');
+    }
+    // B-v3 binding nonce: on the owner's receipt (identity present) and only
+    // there. A public receipt that carries it is leaking a secret: red.
+    let bindingNonce = null;
+    if (!legacy) {
+        const n = hashes.binding_nonce;
+        if (identity === null) {
+            if (!absent(n)) return bad('R_FIELD_FORMAT', 'a public receipt (identity withheld) must not carry binding_nonce');
+        } else if (typeof n !== 'string' || !HEX64.test(n)) {
+            return bad('R_FIELD_FORMAT', 'hashes.binding_nonce is missing or not 64 lowercase hex characters (an owner receipt carries it)');
+        } else {
+            bindingNonce = n;
+        }
     }
 
     // Merkle.
@@ -462,7 +482,7 @@ function parseReceipt(receipt, owner, envelopeBytes) {
         r: {
             entryId: entry.id, legacy, boundRule, statedContentRule, tier, text: entry.text, createdAt: entry.created_at,
             identity, hashText, hashBound: hashes.hash_bound, commitSalt, merkle, btcBlock, blockHash,
-            headerHex, ownerPlaintext, ownerSalt, envelopeBytes: envelopeBytes || null,
+            headerHex, ownerPlaintext, ownerSalt, envelopeBytes: envelopeBytes || null, bindingNonce,
         },
     };
 }
@@ -932,7 +952,7 @@ async function verifyReceiptArtifacts(input, options) {
     } else {
         state.link2Rule = r.boundRule;
         const want = r.boundRule === 'B-v3'
-            ? await bindV3(r.tier, contentRule, r.hashText, r.createdAt, r.identity)
+            ? await bindV3(r.bindingNonce, r.tier, contentRule, r.hashText, r.createdAt, r.identity)
             : await bindHash(r.hashText, r.createdAt, r.identity);
         if (want !== r.hashBound) {
             return red('R_BINDING_MISMATCH', 'link-2 binding', `the leaf is not the hash of what the receipt states (${r.boundRule} gives ${want.slice(0, 12)}…, hash_bound is ${r.hashBound.slice(0, 12)}…)`);
