@@ -58,21 +58,26 @@ function buildZip(files, opts = {}) {
         let flags = f.flags || 0;
         if (f.descriptor) flags |= 0x0008;
         const name = Buffer.from(f.name, 'latin1');
+        const localExtra = f.localExtra || Buffer.alloc(0);
+        const centralExtra = f.centralExtra || Buffer.alloc(0);
         const localName = Buffer.from(f.localName !== undefined ? f.localName : f.name, 'latin1');
         const size = f.declaredSize !== undefined ? f.declaredSize : data.length;
         const localAt = offset;
         push(Buffer.concat([
             u32(0x04034b50), u16(20), u16(flags), u16(method), u16(0), u16(0),
-            u32(f.descriptor ? 0 : crc), u32(f.descriptor ? 0 : body.length), u32(f.descriptor ? 0 : size),
-            u16(localName.length), u16(0), localName,
+            u32(f.descriptor ? 0 : (f.localCrc !== undefined ? f.localCrc : crc)),
+            u32(f.descriptor ? 0 : (f.localCompressed !== undefined ? f.localCompressed : body.length)),
+            u32(f.descriptor ? 0 : size),
+            u16(localName.length), u16(localExtra.length), localName, localExtra,
         ]));
         push(body);
-        if (f.descriptor === 'sig') push(Buffer.concat([u32(0x08074b50), u32(crc), u32(body.length), u32(size)]));
-        if (f.descriptor === 'nosig') push(Buffer.concat([u32(crc), u32(body.length), u32(size)]));
+        const dCrc = f.descriptorCrc !== undefined ? f.descriptorCrc : crc;
+        if (f.descriptor === 'sig') push(Buffer.concat([u32(0x08074b50), u32(dCrc), u32(body.length), u32(size)]));
+        if (f.descriptor === 'nosig') push(Buffer.concat([u32(dCrc), u32(body.length), u32(size)]));
         central.push(Buffer.concat([
             u32(0x02014b50), u16(20), u16(20), u16(flags), u16(method), u16(0), u16(0),
             u32(crc), u32(body.length), u32(size),
-            u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(localAt), name,
+            u16(name.length), u16(centralExtra.length), u16(0), u16(0), u16(0), u32(0), u32(localAt), name, centralExtra,
         ]));
     });
     if (opts.beforeCd) push(opts.beforeCd);
@@ -92,11 +97,16 @@ function buildZip(files, opts = {}) {
         const inner = eocd(Buffer.alloc(0));
         push(eocd(inner));
     } else {
-        push(eocd(Buffer.alloc(0)));
+        push(eocd(opts.comment || Buffer.alloc(0)));
     }
     if (opts.afterEocd) push(opts.afterEocd);
     return new Uint8Array(Buffer.concat(parts));
 }
+
+const extra = (id, data) => Buffer.concat([u16(id), u16(data.length), Buffer.from(data)]);
+// Info-ZIP Unicode Path (0x7075): version 1, CRC of the header name, new name.
+const unicodePath = (headerName, newName) =>
+    extra(0x7075, Buffer.concat([Buffer.from([1]), u32(crc32(Buffer.from(headerName, 'latin1'))), Buffer.from(newName, 'utf8')]));
 
 const RECEIPT = '{"version":"1.2","entry":{"id":1}}';
 const GENUINE_ENV = '{"envelope":"genuine"}';
@@ -125,6 +135,9 @@ module.exports = async function zipAttacks(check) {
         ['deflated', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, deflate: true }].map((f) => ({ ...f, deflate: true })))],
         ['data descriptor with signature (archiver-style)', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV }].map((f) => ({ ...f, deflate: true, descriptor: 'sig' })))],
         ['data descriptor without signature', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV }].map((f) => ({ ...f, descriptor: 'nosig' })))],
+        ['a harmless extended-timestamp extra field and a plain comment',
+            buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localExtra: extra(0x5455, Buffer.from([1, 0, 0, 0, 0])), centralExtra: extra(0x5455, Buffer.from([1, 0, 0, 0, 0])) }],
+                { comment: Buffer.from('Tower receipt') })],
         ['Treasure kit with extra flat files', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV }, { name: 'reference.js', data: 'x' }, { name: 'spec.md', data: 'x' }, { name: 'README.txt', data: 'x' }])],
     ];
     for (const [label, bytes] of controls) {
@@ -167,7 +180,37 @@ module.exports = async function zipAttacks(check) {
         ['empty btc-block-header.bin', buildZip([{ name: 'receipt.json', data: RECEIPT }, { name: 'btc-block-header.bin', data: '' }])],
         ['declared size above the per-file cap', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, declaredSize: zipReader.MAX_FILE_BYTES + 1 }])],
         ['declared size smaller than the inflated size', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, declaredSize: 3 }])],
+        ['CRC-32 wrong in both headers', (() => {
+            const z = Buffer.from(buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localCrc: 1234 }]));
+            // Make the central CRC agree with the wrong local one.
+            const cd = z.lastIndexOf(Buffer.from('envelope.json', 'latin1'));
+            z.writeUInt32LE(1234, cd - 46 + 16);
+            return new Uint8Array(z);
+        })()],
         ['not a ZIP', new Uint8Array(Buffer.from('this is not a zip file at all, just text'))],
+        // CodeRabbit PR 1: a second ZIP hidden in the comment, padded so only
+        // backward-searching readers pick it.
+        ['second ZIP hidden in the comment',
+            (() => {
+                // Same length as the genuine envelope, so only the bytes differ.
+                const forgedSameSize = '{"envelope":"forged!"}';
+                if (forgedSameSize.length !== GENUINE_ENV.length) throw new Error('test setup: sizes differ');
+                const inner = Buffer.from(buildZip([...base(), env('envelope.json', forgedSameSize)]));
+                return buildZip([...base(), env('envelope.json', GENUINE_ENV)], { comment: Buffer.concat([inner, Buffer.from([0])]) });
+            })()],
+        ['a ZIP signature in the comment', buildZip(base(), { comment: Buffer.from('xxPK\u0005\u0006yy', 'latin1') })],
+        // CodeRabbit PR 1: a local Unicode Path field renames payload.txt to
+        // envelope.json in readers that honour it.
+        ['local Unicode Path field renaming an entry to envelope.json',
+            buildZip([...base(), env('envelope.json', GENUINE_ENV), { name: 'payload.txt', data: FORGED_ENV, localExtra: unicodePath('payload.txt', 'envelope.json') }])],
+        ['central Unicode Path field renaming an entry',
+            buildZip([...base(), env('envelope.json', GENUINE_ENV), { name: 'payload.txt', data: FORGED_ENV, centralExtra: unicodePath('payload.txt', 'envelope.json') }])],
+        ['ZIP64 extra field', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localExtra: extra(0x0001, Buffer.alloc(16)) }])],
+        ['extra field that overruns its area', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localExtra: Buffer.concat([u16(0x5455), u16(40), Buffer.alloc(3)]) }])],
+        // A streaming reader trusts the local header or the data descriptor.
+        ['local compressed size differs from the central record', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localCompressed: 5 }])],
+        ['local CRC differs from the central record', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localCrc: 1234 }])],
+        ['data descriptor CRC differs from the central record', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, descriptor: 'sig', descriptorCrc: 1234 }])],
         ['trailing-dot name that Windows maps onto envelope.json', buildZip([...base(), env('envelope.json.'), env('envelope.json', GENUINE_ENV)])],
         ['local header name length runs past the file', (() => {
             const z = buildZip(base());
