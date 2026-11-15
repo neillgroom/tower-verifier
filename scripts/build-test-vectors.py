@@ -85,10 +85,17 @@ def b_hash(hash_text: str, created_at: str, identity: str) -> str:
     return sha256_hex((hash_text + '|' + created_at + '|' + identity).encode('utf-8'))
 
 
-def b_v3(tier: str, content_rule: str, hash_text: str, created_at: str, identity: str) -> str:
-    parts = [b'tower', b'bound', b'v3', tier.encode(), content_rule.encode(),
+# B-v3 binds a per-carve secret nonce first, so a public hash_text and
+# timestamp cannot be used to search for the identity. Label "v4": the
+# unshipped nonce-less layout used "v3", and no input of one can equal the other.
+def b_v3_input(nonce: str, tier: str, content_rule: str, hash_text: str, created_at: str, identity: str) -> bytes:
+    parts = [b'tower', b'bound', b'v4', nonce.encode(), tier.encode(), content_rule.encode(),
              hash_text.encode(), created_at.encode(), identity.encode()]
-    return sha256_hex(b'\x00'.join(parts))
+    return b'\x00'.join(parts)
+
+
+def b_v3(nonce: str, tier: str, content_rule: str, hash_text: str, created_at: str, identity: str) -> str:
+    return sha256_hex(b_v3_input(nonce, tier, content_rule, hash_text, created_at, identity))
 
 
 def a_plain(text: str) -> str:
@@ -423,6 +430,9 @@ def relabel_v3(r):
     r['entry']['tier'] = 'open'
     r['hashes']['bound_rule'] = 'B-v3'
     r['hashes']['content_rule'] = 'A-plain'
+    # An owner v3 receipt carries a nonce; any nonce, since no B-v3 input can
+    # reproduce a B-hash leaf.
+    r['hashes']['binding_nonce'] = sha256_hex(b'synthetic binding nonce')
 
 
 files, _ = real3_with(relabel_v3)
@@ -533,9 +543,11 @@ def anchored(r: dict, extra=None, with_header=True):
 
 USER_ID = '4242'
 TS = '2026-11-12T09:30:00.000Z'
+# Fixed synthetic nonce, derived without the PRNG so no other vector moves.
+NONCE = sha256_hex(b'synthetic binding nonce')
 
 
-def v3_receipt(tier, text, content_rule, hash_text, identity=USER_ID, salt_in_receipt=None):
+def v3_receipt(tier, text, content_rule, hash_text, identity=USER_ID, salt_in_receipt=None, nonce=NONCE):
     r = {
         'tower': 'THE TOWER — Proof Receipt',
         'version': '1.3',
@@ -544,8 +556,8 @@ def v3_receipt(tier, text, content_rule, hash_text, identity=USER_ID, salt_in_re
                   'created_at': TS, 'source': 'web'},
         'identity': {'alias': None, 'binding_identity': identity, 'binding_field': 'user_id'},
         'hashes': {'hash_text': hash_text,
-                   'hash_bound': b_v3(tier, content_rule, hash_text, TS, identity),
-                   'bound_rule': 'B-v3', 'content_rule': content_rule},
+                   'hash_bound': b_v3(nonce, tier, content_rule, hash_text, TS, identity),
+                   'bound_rule': 'B-v3', 'content_rule': content_rule, 'binding_nonce': nonce},
     }
     if salt_in_receipt:
         r['hashes']['commit_salt'] = salt_in_receipt
@@ -608,6 +620,7 @@ pub['identity'] = {'redacted': True, 'note': 'withheld'}
 pub_files = anchored(pub)
 pub = json.loads(pub_files['receipt.json'])
 pub['hashes'].pop('hash_text')
+pub['hashes'].pop('binding_nonce')
 pub_files['receipt.json'] = dump(pub)
 add('v3-sealed-public', pub_files, 'amber', 'A_IDENTITY_WITHHELD',
     'public v3 Sealed receipt: identity and hash_text withheld', test_policy=True)
@@ -633,6 +646,7 @@ r['version'] = '1.2'
 r['protocol_version'] = 2
 del r['hashes']['bound_rule']
 del r['hashes']['content_rule']
+del r['hashes']['binding_nonce']
 f['receipt.json'] = dump(r)
 add('forged-v3-presented-as-legacy', f, 'red', 'R_BINDING_MISMATCH',
     'B-v3 leaf with its rule statements stripped is judged by B-hash and fails', test_policy=True)
@@ -860,15 +874,86 @@ add('forged-bitcoin-not-object', files, 'red', 'R_FIELD_FORMAT', 'receipt.bitcoi
 files, _ = real3_with(lambda r: r.__setitem__('bitcoin', 'confirmed'), drop=('btc-block-header.bin',))
 add('forged-bitcoin-string', files, 'red', 'R_FIELD_FORMAT', 'receipt.bitcoin is a string')
 
+# ---------------------------------------------------------------- per-carve binding nonce
+
+# Owner receipt with the right nonce: green (v3-open above). Wrong, shifted,
+# malformed or missing nonce: red. Public receipt: no nonce, amber.
+WRONG_NONCE = sha256_hex(b'some other carve nonce')
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+r['hashes']['binding_nonce'] = WRONG_NONCE
+add('nonce-wrong', anchored(r), 'red', 'R_BINDING_MISMATCH',
+    'owner receipt states a different nonce than the leaf was bound with', test_policy=True)
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+r['hashes']['binding_nonce'] = '0' + NONCE[:63]
+add('nonce-boundary-shift', anchored(r), 'red', 'R_BINDING_MISMATCH',
+    'nonce shifted one hex character (still 64 hex): the leaf does not reproduce', test_policy=True)
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+r['hashes']['binding_nonce'] = NONCE[:63]
+add('nonce-short', anchored(r), 'red', 'R_FIELD_FORMAT', 'binding_nonce of 63 hex characters', test_policy=True)
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+r['hashes']['binding_nonce'] = NONCE.upper()
+add('nonce-upper', anchored(r), 'red', 'R_FIELD_FORMAT', 'binding_nonce in uppercase hex', test_policy=True)
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+del r['hashes']['binding_nonce']
+add('nonce-missing-owner', anchored(r), 'red', 'R_FIELD_FORMAT',
+    'owner v3 receipt (identity present) without binding_nonce', test_policy=True)
+# Moving the nonce into the identity field, with a user-id identity in the
+# nonce field, is refused by the field formats before anything is hashed.
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+r['identity']['binding_identity'] = NONCE
+r['identity']['binding_field'] = 'phone_hash'
+r['hashes']['binding_nonce'] = USER_ID
+add('nonce-identity-swap', anchored(r), 'red', 'R_FIELD_FORMAT',
+    'nonce and a user-id identity swapped between fields', test_policy=True)
+# With a phone-hash identity both values are 64 hex, so the formats pass and
+# link 2 must catch the swap.
+SYN_PHONE = sha256_hex(b'synthetic phone hash')
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN), identity=SYN_PHONE)
+r['identity']['binding_field'] = 'phone_hash'
+r['identity']['binding_identity'] = NONCE
+r['hashes']['binding_nonce'] = SYN_PHONE
+add('nonce-phone-identity-swap', anchored(r), 'red', 'R_BINDING_MISMATCH',
+    'nonce and a phone-hash identity swapped: both 64 hex, link 2 fails', test_policy=True)
+# Public Open receipt: identity and nonce withheld, text and hash_text shown.
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
+f = anchored(r)
+r = json.loads(f['receipt.json'])
+r['identity'] = {'redacted': True, 'note': 'withheld'}
+del r['hashes']['binding_nonce']
+f['receipt.json'] = dump(r)
+add('v3-open-public', f, 'amber', 'A_IDENTITY_WITHHELD',
+    'public v3 Open receipt: identity and nonce withheld; link 1 checked, link 2 amber', test_policy=True,
+    link1='A-plain')
+r = v3_receipt('sealed', SECRET, 'A-salted', SEALED_HT, salt_in_receipt=SALT)
+fr = anchored(r)
+r = json.loads(fr['receipt.json'])
+r['identity'] = {'redacted': True, 'note': 'withheld'}
+del r['hashes']['binding_nonce']
+fr['receipt.json'] = dump(r)
+add('v3-sealed-revealed-public', fr, 'amber', 'A_IDENTITY_WITHHELD',
+    'public revealed v3 Sealed receipt: salt and text shown, identity and nonce withheld', test_policy=True,
+    link1='A-salted')
+# A public receipt must never carry the nonce: red, so a server leak is loud.
+r = json.loads(f['receipt.json'])
+r['hashes']['binding_nonce'] = NONCE
+f2 = dict(f)
+f2['receipt.json'] = dump(r)
+add('nonce-on-public', f2, 'red', 'R_FIELD_FORMAT',
+    'public receipt (identity withheld) carries binding_nonce', test_policy=True)
+# A legacy receipt never carries a nonce.
+files, _ = real3_with(lambda r: r['hashes'].__setitem__('binding_nonce', NONCE))
+add('nonce-on-legacy', files, 'red', 'R_FIELD_FORMAT', 'binding_nonce on a protocol 1/2 receipt')
+
 # ---------------------------------------------------------------- pinned format vectors
 
 fv = {
     'b-hash': {'hash_text': H, 'created_at': REAL_TS, 'identity': PHONE,
                'hash_bound': b_hash(H, REAL_TS, PHONE)},
-    'b-v3': {'tier': 'open', 'content_rule': 'A-plain', 'hash_text': H, 'created_at': TS, 'identity': '42',
-             'input_hex': b'\x00'.join([b'tower', b'bound', b'v3', b'open', b'A-plain', H.encode(),
-                                        TS.encode(), b'42']).hex(),
-             'hash_bound': b_v3('open', 'A-plain', H, TS, '42')},
+    'b-v3': {'nonce': NONCE, 'tier': 'open', 'content_rule': 'A-plain', 'hash_text': H, 'created_at': TS,
+             'identity': '42',
+             'input_hex': b'\x00'.join([b'tower', b'bound', b'v4', NONCE.encode(), b'open', b'A-plain',
+                                        H.encode(), TS.encode(), b'42']).hex(),
+             'hash_bound': b_v3(NONCE, 'open', 'A-plain', H, TS, '42')},
     'a-salted': {'salt': 'ab' * 32, 'plaintext': 'hello, tower',
                  'input_hex': (b'tower\x00commit\x00v1\x00' + ('ab' * 32).encode() + b'\x00hello, tower').hex(),
                  'hash_text': a_salted('ab' * 32, 'hello, tower')},

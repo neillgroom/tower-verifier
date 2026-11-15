@@ -7,7 +7,7 @@ All notable changes to the Tower Verifier are documented here. Each tagged relea
 Green now means every piece of content the receipt shows is tied, link by link, to a Bitcoin block header that carries real work. Receipt formats: `docs/formats.md`.
 
 ### Changed (verification semantics)
-- Five links, all required for green: content to `hash_text` (`A-plain`, `A-salted`, `A-envelope`, fixed by tier), `hash_text` + timestamp + identity to `hash_bound` (`B-hash` or `B-v3` only), Merkle path, OTS proof to the header's Merkle root, header is real.
+- Five links, all required for green: content to `hash_text` (`A-plain`, `A-salted`, `A-envelope`, fixed by tier), `hash_text` + timestamp + identity (plus, under `B-v3`, the owner-only binding nonce) to `hash_bound` (`B-hash` or `B-v3` only), Merkle path, OTS proof to the header's Merkle root, header is real.
 - Check order: field formats, tier/marker consistency, every link the receipt carries data for (any failure red), and only then amber for missing pieces.
 - Header floors pinned in the verifier (minimum height 940842, absolute target ceiling, minimum date), re-derived from `test-vectors/anchored-headers.json` by `scripts/derive-header-constants.js` in the test run. Previously a header with self-declared easy bits could pass.
 - A stated `btc_block` must match a Bitcoin attestation; a pending-only proof under a stated block is red.
@@ -16,6 +16,7 @@ Green now means every piece of content the receipt shows is tied, link by link, 
 - Entries 58 and 59 (binding never recorded) are pinned amber `A_BINDING_UNRECORDED`, never green.
 - Hidden Sealed / Time Capsule with no plaintext: green `G_HIDDEN`, labelled "COMMITMENT ANCHORED — CONTENT HIDDEN", never plain "VERIFIED".
 - Receipt version 1.3 / protocol 3 (`B-v3`, `A-salted`, `A-envelope`) accepted ahead of the server producing it.
+- `B-v3` binds a per-carve secret `binding_nonce` (64 hex) first, so a public `hash_text` and timestamp cannot be used to search for the carver's identity. The nonce is on the owner's receipt only; a public receipt carrying it is red.
 - Each result has a stable outcome code and a label, and names the link-1 and link-2 rules evaluated.
 
 ### Removed claims

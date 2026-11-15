@@ -932,5 +932,83 @@
   "overall": "red",
   "code": "R_FIELD_FORMAT",
   "desc": "receipt.bitcoin is a string"
+ },
+ {
+  "name": "nonce-wrong",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "owner receipt states a different nonce than the leaf was bound with",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-boundary-shift",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "nonce shifted one hex character (still 64 hex): the leaf does not reproduce",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-short",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "binding_nonce of 63 hex characters",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-upper",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "binding_nonce in uppercase hex",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-missing-owner",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "owner v3 receipt (identity present) without binding_nonce",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-identity-swap",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "nonce and a user-id identity swapped between fields",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-phone-identity-swap",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "nonce and a phone-hash identity swapped: both 64 hex, link 2 fails",
+  "testPolicy": true
+ },
+ {
+  "name": "v3-open-public",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "public v3 Open receipt: identity and nonce withheld; link 1 checked, link 2 amber",
+  "testPolicy": true,
+  "link1": "A-plain"
+ },
+ {
+  "name": "v3-sealed-revealed-public",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "public revealed v3 Sealed receipt: salt and text shown, identity and nonce withheld",
+  "testPolicy": true,
+  "link1": "A-salted"
+ },
+ {
+  "name": "nonce-on-public",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "public receipt (identity withheld) carries binding_nonce",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-on-legacy",
+  "overall": "red",
+  "code": "R_FIELD_FORMAT",
+  "desc": "binding_nonce on a protocol 1/2 receipt"
  }
 ]
