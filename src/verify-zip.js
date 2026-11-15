@@ -31,7 +31,9 @@
     const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // all inflated files together
     const MAX_ENTRIES = 20; //                   every record
     const ALLOWED_FILES = ['receipt.json', 'merkle-root.ots', 'btc-block-header.bin', 'envelope.json'];
-    const SAFE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+    // No trailing dot: Windows strips it on extraction, so "envelope.json."
+    // would land on top of "envelope.json".
+    const SAFE_NAME = /^[A-Za-z0-9_-](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/;
 
     const SIG_LOCAL = 0x04034b50;
     const SIG_CENTRAL = 0x02014b50;
@@ -144,7 +146,8 @@
         // Local entries: contiguous from byte 0 to the central directory, in
         // the same order, each with the same name as its central record.
         let expect = 0;
-        for (const e of entries) {
+        for (let i = 0; i < entries.length; i++) {
+            const e = entries[i];
             if (e.localOffset !== expect) fail(`entry "${e.name}" is not where the previous one ends`);
             need(b, e.localOffset, 30, 'local header');
             if (u32(b, e.localOffset) !== SIG_LOCAL) fail(`bad local header for "${e.name}"`);
@@ -152,6 +155,7 @@
             const lMethod = u16(b, e.localOffset + 8);
             const lNameLen = u16(b, e.localOffset + 26);
             const lExtraLen = u16(b, e.localOffset + 28);
+            need(b, e.localOffset + 30, lNameLen + lExtraLen, 'local header');
             if (lFlags & 0x0001) fail('encrypted entries are not accepted');
             if (lMethod !== e.method) fail(`local and central records disagree on "${e.name}"`);
             if (lNameLen !== e.nameLen || !sameBytes(b, e.localOffset + 30, e.cdNameAt, e.nameLen)) {
@@ -160,9 +164,15 @@
             let end = e.localOffset + 30 + lNameLen + lExtraLen + e.compressedSize;
             if (end > cdOffset) fail(`entry "${e.name}" runs into the central directory`);
             if (e.flags & 0x0008) {
-                // Data descriptor: 12 bytes, or 16 with its optional signature.
-                end += end + 4 <= cdOffset && u32(b, end) === SIG_DESCRIPTOR ? 16 : 12;
-                if (end > cdOffset) fail(`entry "${e.name}" runs into the central directory`);
+                // Data descriptor: 12 bytes, or 16 when it carries its optional
+                // signature. Judged by where the next entry (or the central
+                // directory) actually starts, never by sniffing alone.
+                const next = i + 1 < entries.length ? entries[i + 1].localOffset : cdOffset;
+                const gap = next - end;
+                if (!(gap === 12 || (gap === 16 && u32(b, end) === SIG_DESCRIPTOR))) {
+                    fail(`entry "${e.name}" has a malformed data descriptor`);
+                }
+                end = next;
             }
             expect = end;
         }

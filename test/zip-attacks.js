@@ -168,6 +168,15 @@ module.exports = async function zipAttacks(check) {
         ['declared size above the per-file cap', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, declaredSize: zipReader.MAX_FILE_BYTES + 1 }])],
         ['declared size smaller than the inflated size', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, declaredSize: 3 }])],
         ['not a ZIP', new Uint8Array(Buffer.from('this is not a zip file at all, just text'))],
+        ['trailing-dot name that Windows maps onto envelope.json', buildZip([...base(), env('envelope.json.'), env('envelope.json', GENUINE_ENV)])],
+        ['local header name length runs past the file', (() => {
+            const z = buildZip(base());
+            Buffer.from(z.buffer, z.byteOffset).writeUInt16LE(0xfff0, 26); // first local header's name length
+            return z;
+        })()],
+        ['data descriptor followed by four stray bytes', buildZip([...base().map((f) => ({ ...f, descriptor: 'nosig' })), env('envelope.json', GENUINE_ENV)], {
+            between: { index: 3, bytes: Buffer.from('XXXX') },
+        })],
     ];
     for (const [label, bytes] of attacks) {
         const r = await outcome(bytes);

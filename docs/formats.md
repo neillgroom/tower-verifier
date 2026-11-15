@@ -243,9 +243,9 @@ walked and the ZIP is refused unless:
   multi-disk, or encrypted entries; stored or deflated only;
 - the central directory holds exactly the records the end record declares,
   counted from the real headers, at most 20;
-- every entry name is a flat file name (`[A-Za-z0-9_-][A-Za-z0-9._-]*`, no
-  path, no directory, no `.` or `..` segment) and no two names are equal,
-  case ignored;
+- every entry name is a flat file name (letters, digits, `.`, `_`, `-`; it
+  may not start or end with `.`; no path, no directory) and no two names are
+  equal, case ignored;
 - local entries start at byte 0 and follow one another with no gap or
   overlap (only a data descriptor may sit between them), each with the same
   name as its central record, ending where the central directory begins;
