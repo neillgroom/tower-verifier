@@ -36,7 +36,7 @@ cd tower-verifier
 3. **Link 2, commitment to leaf.** `hash_text`, the timestamp and the identity hash to `hash_bound`, by exactly one of two formats: `B-hash` (every carve before protocol 3) or `B-v3` (domain-separated, from protocol 3, and also binding a per-carve secret nonce that only the owner's receipt carries, so the identity cannot be searched for from public data). Nothing else is accepted.
 4. **Link 3, leaf to root.** The Merkle path from `hash_bound` reaches `merkle_root` (Tower's hex-string concatenation convention).
 5. **Link 4, root to header.** The OpenTimestamps proof, parsed inline with bounded size and operation count, ends at the Merkle root inside the bundled 80-byte header, at the height the receipt states.
-6. **Link 5, the header is real.** Pinned minimum height (940842, Tower's first anchored block), pinned absolute difficulty ceiling, pinned minimum date, and `sha256d(header)` below its own target. None of these depend on a value the receipt chooses.
+6. **Link 5, the header is real.** Pinned absolute difficulty ceiling, pinned minimum date, and `sha256d(header)` below its own target, all read from the header itself. The pinned minimum height (940842, Tower's first anchored block) is checked against the height the OpenTimestamps proof states; the header does not prove its own height.
 
 Any check that runs and fails is **RED**, even if something else is also missing. Only after every available link has passed may a missing piece make the result **AMBER**.
 
@@ -44,10 +44,10 @@ Any check that runs and fails is **RED**, even if something else is also missing
 |---|---|
 | **VERIFIED** (green) | The content shown (or the Treasure envelope) was anchored in this block |
 | **COMMITMENT ANCHORED — CONTENT HIDDEN** (green) | A hidden Sealed / Time Capsule carve by this identity was anchored. No content is shown, so none is claimed |
-| **NOT FULLY PROVEN** (amber) | The anchor checks out but something is not proven: not yet batched, OTS pending, no OTS or header bundled, identity withheld (every public receipt), binding unrecorded (two pinned early entries), Treasure envelope not supplied |
+| **NOT FULLY PROVEN** (amber) | Something is not proven, and the result says whether the Bitcoin anchor itself was checked: not yet batched, OTS pending, no OTS or header bundled, identity withheld (every public receipt), binding unrecorded (two pinned early entries), Treasure envelope not supplied |
 | **FAILED** (red) | A claim in the receipt is false or malformed; the result names which |
 
-The proven date is the Bitcoin block header's own timestamp. The receipt's `created_at` is shown only as "stated by the receipt", and only when link 2 held. Every result names the link-1 and link-2 rules it evaluated.
+The block time shown is the timestamp in the Bitcoin block header. A miner sets it, and Bitcoin only keeps it within about two hours of real time, so it dates the anchor approximately; it is not an exact proven moment. The block height comes from the timestamp proof and is not proven by the header; the explorer link goes by block hash. The receipt's `created_at` is shown only as "stated by the receipt", and only when link 2 held. Every result names the link-1 and link-2 rules it evaluated.
 
 **Hidden content.** This page takes no plaintext, salt or key file. A hidden Sealed or Time Capsule entry shows "commitment anchored, content hidden"; its owner can decrypt and check the content with The Tower's decrypt page (https://thetower.one/decrypt.html), linked from the result. The page fetches nothing (CSP `connect-src 'none'`).
 

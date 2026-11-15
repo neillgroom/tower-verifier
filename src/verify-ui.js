@@ -71,12 +71,13 @@
         addRow(facts, 'Content rule (link 1)', result.link1Rule);
         addRow(facts, 'Binding rule (link 2)', result.link2Rule);
         if (result.blockTime) {
-            addRow(facts, 'Proven date', `${result.blockTime} — the Bitcoin block's own timestamp (block ${result.blockHeight})`);
+            addRow(facts, 'Block time', `${result.blockTime} — the Bitcoin block header's timestamp (set by its miner; within about two hours of real time)`);
+            addRow(facts, 'Block height', `${result.blockHeight} — as stated by the timestamp proof; confirm it on the explorer`);
         }
         if (result.statedCreatedAt) {
             addRow(facts, 'Carve time stated by the receipt', result.blockTime
-                ? `${result.statedCreatedAt} (bound into the leaf; the block date above is the proof)`
-                : `${result.statedCreatedAt} (bound into the leaf; the anchor date is not yet proven)`);
+                ? `${result.statedCreatedAt} (bound into the leaf; the block time above dates the anchor)`
+                : `${result.statedCreatedAt} (bound into the leaf; the anchor is not yet checked)`);
         }
         out.appendChild(facts);
 
@@ -86,7 +87,7 @@
             a.href = `https://mempool.space/block/${result.blockHashHex}`;
             a.target = '_blank';
             a.rel = 'noopener noreferrer';
-            a.textContent = `mempool.space → block ${result.blockHeight}`;
+            a.textContent = `mempool.space → block ${result.blockHashHex}`;
             link.appendChild(document.createTextNode('Confirm the block is in the Bitcoin main chain: '));
             link.appendChild(a);
             out.appendChild(link);

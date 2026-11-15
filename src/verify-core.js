@@ -108,8 +108,8 @@ async function selfTest() {
 //   link 3  Merkle path      -> merkle_root
 //   link 4  OTS proof        -> header merkle root
 //   link 5  header is real   (pinned height, work and date floors)
-// AMBER means the anchor checks out but something shown or implied is not
-// proven, and the result says what. RED means a claim in the receipt is
+// AMBER means something shown or implied is not proven; the result says
+// what, and whether the anchor itself was checked. RED means a claim in the receipt is
 // false or malformed.
 //
 // Order, so an amber can never mask a false claim: field formats; tier and
@@ -1049,7 +1049,7 @@ async function verifyReceiptArtifacts(input, options) {
                         return red('R_OTS', 'link-4 ots', `the OTS proof for block ${chosen.blockHeight} does not end at the header's merkle root`);
                     }
                     log('link-4 ots', 'pass', `OTS proof ends at the merkle root of block ${chosen.blockHeight}`);
-                    log('link-5 header', 'pass', `header carries real launch-era Bitcoin work (bits 0x${real.bits.toString(16).padStart(8, '0')}, at or under the pinned ceiling; dated ${new Date(real.time * 1000).toISOString()})`);
+                    log('link-5 header', 'pass', `header carries real launch-era Bitcoin work (bits 0x${real.bits.toString(16).padStart(8, '0')}, at or under the pinned ceiling; header time ${new Date(real.time * 1000).toISOString()}, set by its miner and kept by Bitcoin within about two hours)`);
                     anchor = { blockHeight: chosen.blockHeight, blockHashHex: real.blockHashHex, blockTime: new Date(real.time * 1000).toISOString() };
                 }
             }
@@ -1062,7 +1062,7 @@ async function verifyReceiptArtifacts(input, options) {
         const code = AMBER_PRIORITY.find((c) => ambers.includes(c));
         const others = ambers.filter((c) => c !== code).map((c) => SUMMARIES[c]);
         const anchorLine = anchor
-            ? ` The anchor is proven: the leaf reaches block ${anchor.blockHeight}, whose header carries real launch-era work.`
+            ? ` The anchor is proven: the leaf reaches the block ${anchor.blockHashHex} (height ${anchor.blockHeight} as stated by the timestamp proof), whose header carries real launch-era work.`
             : ' The Bitcoin anchor was not fully checked.';
         return finish(code, SUMMARIES[code] + (others.length ? ' Also: ' + others.join(' ') : '') + anchorLine, { ambers, ...anchorExtra, ...stated });
     }
@@ -1077,7 +1077,7 @@ async function verifyReceiptArtifacts(input, options) {
         // Unreachable by construction; refuse rather than show green.
         return red('R_FIELD_FORMAT', 'internal', 'internal: a link was not proven but no amber was recorded');
     }
-    const residual = ` Proven: the content commitment, binding (${state.link2Rule}), Merkle path and OpenTimestamps proof lead to a header carrying real launch-era Bitcoin work, block ${anchor.blockHeight}, dated ${anchor.blockTime} by the block itself. Not proven offline: that this block is in the main chain — confirm it on the linked explorer. Forging this would need mining a block at real Bitcoin difficulty.`;
+    const residual = ` Proven: the content commitment, binding (${state.link2Rule}), Merkle path and OpenTimestamps proof lead to a header carrying real launch-era Bitcoin work: block ${anchor.blockHashHex} (height ${anchor.blockHeight} as stated by the timestamp proof; the header does not prove its height), block time ${anchor.blockTime} (set by its miner, kept by Bitcoin within about two hours). Not proven offline: that this block is in the main chain — confirm it on the linked explorer. Forging this would need mining a block at real Bitcoin difficulty.`;
     return finish(code, SUMMARIES[code] + residual, { ambers: [], provenContent, ...anchorExtra, ...stated });
 }
 

@@ -39,6 +39,10 @@
     const SIG_CENTRAL = 0x02014b50;
     const SIG_EOCD = 0x06054b50;
     const SIG_ZIP64_LOCATOR = 0x07064b50;
+    const SIG_ZIP64_EOCD = 0x06064b50;
+    // General-purpose flag bits a receipt ZIP may use: deflate options
+    // (bits 1-2), data descriptor (bit 3), UTF-8 names (bit 11).
+    const ALLOWED_FLAGS = 0x0002 | 0x0004 | 0x0008 | 0x0800;
     const SIG_DESCRIPTOR = 0x08074b50;
 
     function fail(msg) {
@@ -55,12 +59,44 @@
         if (i < 0 || i + n > b.length) fail(what + ' runs past the end of the file');
     }
 
+    let crcTable = null;
+    function crc32(bytes) {
+        if (!crcTable) {
+            crcTable = new Uint32Array(256);
+            for (let n = 0; n < 256; n++) {
+                let c = n;
+                for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+                crcTable[n] = c >>> 0;
+            }
+        }
+        let c = 0xffffffff;
+        for (let k = 0; k < bytes.length; k++) c = crcTable[(c ^ bytes[k]) & 0xff] ^ (c >>> 8);
+        return (c ^ 0xffffffff) >>> 0;
+    }
+
     function sameBytes(b, i, j, n) {
         for (let k = 0; k < n; k++) if (b[i + k] !== b[j + k]) return false;
         return true;
     }
 
-    // Walk the archive. Returns [{ name, flags, method, compressedSize,
+    // Extra fields must tile their area exactly, and none may change how an
+    // entry is named or sized: 0x7075 (Info-ZIP Unicode Path) renames an
+    // entry in readers that honour it, 0x0001 is ZIP64.
+    const FORBIDDEN_EXTRA = { 0x7075: 'a Unicode Path extra field (it can rename the entry)', 0x0001: 'a ZIP64 extra field' };
+    function checkExtra(b, at, len, name, where) {
+        let q = at;
+        const end = at + len;
+        while (q < end) {
+            if (q + 4 > end) fail(`the ${where} extra field of "${name}" is malformed`);
+            const id = u16(b, q);
+            const size = u16(b, q + 2);
+            if (q + 4 + size > end) fail(`the ${where} extra field of "${name}" is malformed`);
+            if (FORBIDDEN_EXTRA[id]) fail(`"${name}" carries ${FORBIDDEN_EXTRA[id]} in its ${where} header`);
+            q += 4 + size;
+        }
+    }
+
+    // Walk the archive. Returns [{ name, crc, compressedSize,
     // uncompressedSize }] in central-directory order, or throws.
     function scanZip(input) {
         const b = input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -78,6 +114,21 @@
             }
         }
         if (eocd === -1) fail('not a ZIP file (no end-of-central-directory record at the end)');
+        // Readers that search backward for the last end record (JSZip, unzip)
+        // must land on this one. So no record signature may start anywhere
+        // after its own four signature bytes (one could straddle the
+        // comment-length field and the comment), and the comment may hold no
+        // "PK" pair at all. The second rule is deliberately stricter: plain
+        // text "PK" in a comment is refused too.
+        for (let k = eocd + 1; k + 4 <= b.length; k++) {
+            const s = u32(b, k);
+            if (s === SIG_EOCD || s === SIG_CENTRAL || s === SIG_LOCAL || s === SIG_ZIP64_LOCATOR || s === SIG_ZIP64_EOCD) {
+                fail('a ZIP record signature appears after the end record');
+            }
+        }
+        for (let k = eocd + 22; k + 1 < b.length; k++) {
+            if (b[k] === 0x50 && b[k + 1] === 0x4b) fail('the ZIP comment contains "PK", which could hide a second archive');
+        }
 
         const disk = u16(b, eocd + 4);
         const cdDisk = u16(b, eocd + 6);
@@ -104,15 +155,22 @@
             if (u32(b, p) !== SIG_CENTRAL) fail('bad central directory record');
             const flags = u16(b, p + 8);
             const method = u16(b, p + 10);
+            const crc = u32(b, p + 16);
             const compressedSize = u32(b, p + 20);
             const uncompressedSize = u32(b, p + 24);
             const nameLen = u16(b, p + 28);
             const extraLen = u16(b, p + 30);
             const commentLen = u16(b, p + 32);
             const diskStart = u16(b, p + 34);
+            const externalAttr = u32(b, p + 38);
             const localOffset = u32(b, p + 42);
             need(b, p + 46, nameLen + extraLen + commentLen, 'central record');
             if (flags & 0x0001) fail('encrypted entries are not accepted');
+            if (flags & ~ALLOWED_FLAGS) fail('an entry uses ZIP flags a receipt never needs');
+            const unixType = (externalAttr >>> 16) & 0xf000;
+            if ((externalAttr & 0x18) !== 0 || (unixType !== 0 && unixType !== 0x8000)) {
+                fail('an entry is marked as a directory, link or other non-file');
+            }
             if (method !== 0 && method !== 8) fail('only stored or deflated entries are accepted');
             if (diskStart !== 0) fail('multi-disk archives are not accepted');
             if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
@@ -128,10 +186,12 @@
             const key = name.toLowerCase();
             if (seen.has(key)) fail(`two entries are named "${name}"`);
             seen.add(key);
+            checkExtra(b, p + 46 + nameLen, extraLen, name, 'central');
             entries.push({
                 name,
                 flags,
                 method,
+                crc,
                 compressedSize,
                 uncompressedSize,
                 localOffset,
@@ -161,6 +221,11 @@
             if (lNameLen !== e.nameLen || !sameBytes(b, e.localOffset + 30, e.cdNameAt, e.nameLen)) {
                 fail(`local and central names disagree on "${e.name}"`);
             }
+            if (lFlags !== e.flags) fail(`local and central flags disagree on "${e.name}"`);
+            checkExtra(b, e.localOffset + 30 + lNameLen, lExtraLen, e.name, 'local');
+            // A streaming reader trusts the local header (or the data
+            // descriptor), not the central record: they must agree.
+            const same = (crc, cs, us) => crc === e.crc && cs === e.compressedSize && us === e.uncompressedSize;
             let end = e.localOffset + 30 + lNameLen + lExtraLen + e.compressedSize;
             if (end > cdOffset) fail(`entry "${e.name}" runs into the central directory`);
             if (e.flags & 0x0008) {
@@ -172,7 +237,20 @@
                 if (!(gap === 12 || (gap === 16 && u32(b, end) === SIG_DESCRIPTOR))) {
                     fail(`entry "${e.name}" has a malformed data descriptor`);
                 }
+                const d = gap === 16 ? end + 4 : end;
+                if (!same(u32(b, d), u32(b, d + 4), u32(b, d + 8))) {
+                    fail(`the data descriptor of "${e.name}" disagrees with its central record`);
+                }
+                // A reader that ignores bit 3 reads the local header's sizes.
+                const lc = u32(b, e.localOffset + 14);
+                const lcs = u32(b, e.localOffset + 18);
+                const lus = u32(b, e.localOffset + 22);
+                if (!((lc === 0 && lcs === 0 && lus === 0) || same(lc, lcs, lus))) {
+                    fail(`local sizes of "${e.name}" are neither zero nor its central record`);
+                }
                 end = next;
+            } else if (!same(u32(b, e.localOffset + 14), u32(b, e.localOffset + 18), u32(b, e.localOffset + 22))) {
+                fail(`local and central sizes or checksum disagree on "${e.name}"`);
             }
             expect = end;
         }
@@ -180,6 +258,7 @@
 
         return entries.map((e) => ({
             name: e.name,
+            crc: e.crc,
             compressedSize: e.compressedSize,
             uncompressedSize: e.uncompressedSize,
         }));
@@ -259,6 +338,7 @@
             // Raw bytes: an envelope is hashed exactly as it sits in the ZIP.
             const bytes = await inflateCapped(zip.files[e.name], e.name, budget);
             if (bytes.length !== e.uncompressedSize) fail(`${e.name} inflates to a different size than declared`);
+            if (crc32(bytes) !== e.crc) fail(`${e.name} does not match its CRC-32`);
             result[e.name] = bytes;
         }
         return result;

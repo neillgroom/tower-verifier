@@ -22,8 +22,8 @@ a Bitcoin block header that carries real work:
 4. OpenTimestamps proof -> the header's Merkle root
 5. the header is real (pinned height, work and date floors; see below)
 
-AMBER means the anchor checks out but something shown or implied is not
-proven, and the result says what. RED means a claim in the receipt is false or
+AMBER means something the receipt shows or implies is not proven; the result
+says what, and whether the Bitcoin anchor itself was checked. RED means a claim in the receipt is false or
 malformed.
 
 ## Field formats (checked before anything is hashed)
@@ -284,7 +284,9 @@ carries `label`, the traffic-light text: `VERIFIED` for the content-bearing
 greens (`G_CONTENT`, `G_OWNER_CONTENT`, `G_ENVELOPE`), `COMMITMENT ANCHORED —
 CONTENT HIDDEN` for `G_HIDDEN`, `NOT FULLY PROVEN` for amber, `FAILED` for red.
 A green result carries `blockHeight`, `blockHashHex` and `blockTime` (the
-header's own timestamp, the only proven date); `statedCreatedAt` (the receipt's
+header's own timestamp: miner-set, kept by Bitcoin within about two hours of
+real time); `blockHeight` is the height the OTS attestation states, which the
+header does not prove; `statedCreatedAt` (the receipt's
 `created_at`) is present only when link 2 held. The full list is
 `OUTCOME_CODES` in `src/verify-core.js`; `test/run.js` fails if any code has no
 vector.
