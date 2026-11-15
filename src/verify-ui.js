@@ -71,7 +71,7 @@
         addRow(facts, 'Content rule (link 1)', result.link1Rule);
         addRow(facts, 'Binding rule (link 2)', result.link2Rule);
         if (result.blockTime) {
-            addRow(facts, 'Block time', `${result.blockTime} — the Bitcoin block header's timestamp (set by its miner; within about two hours of real time)`);
+            addRow(facts, 'Block time', `${result.blockTime} — the Bitcoin block header's timestamp (declared by its miner; approximate, no accuracy guarantee)`);
             addRow(facts, 'Block height', `${result.blockHeight} — as stated by the timestamp proof; confirm it on the explorer`);
         }
         if (result.statedCreatedAt) {
