@@ -247,7 +247,7 @@ manifest.append({'name': 'sealed-entry-4', 'overall': 'green', 'code': 'G_HIDDEN
 
 # Captured public receipts (genuine bytes, fetched read-only from
 # https://thetower.one/api/proof/by-hash/<hash_bound>; see the docstring).
-for path in sorted(CAPTURED.glob('entry-*.json'), key=lambda p: int(p.stem.split('-')[1])):
+for path in sorted(CAPTURED.glob('entry-*.json'), key=lambda p: (int(p.stem.split('-')[1]), p.name)):
     raw = path.read_bytes()
     r = json.loads(raw)
     eid = r['entry']['id']

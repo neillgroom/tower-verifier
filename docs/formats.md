@@ -264,8 +264,7 @@ carries `label`, the traffic-light text: `VERIFIED` for the content-bearing
 greens (`G_CONTENT`, `G_OWNER_CONTENT`, `G_ENVELOPE`), `COMMITMENT ANCHORED —
 CONTENT HIDDEN` for `G_HIDDEN`, `NOT FULLY PROVEN` for amber, `FAILED` for red.
 A green result carries `blockHeight`, `blockHashHex` and `blockTime` (the
-header's own timestamp: miner-set, kept by Bitcoin within about two hours of
-real time); `blockHeight` is the height the OTS attestation states, which the
+header's own timestamp: declared by its miner, with no accuracy guarantee); `blockHeight` is the height the OTS attestation states, which the
 header does not prove; `statedCreatedAt` (the receipt's
 `created_at`) is present only when link 2 held. The full list is
 `OUTCOME_CODES` in `src/verify-core.js`; `test/run.js` fails if any code has no

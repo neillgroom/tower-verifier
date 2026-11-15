@@ -1028,7 +1028,7 @@ async function verifyReceiptArtifacts(input, options) {
                         return red('R_OTS', 'link-4 ots', `the OTS proof for block ${chosen.blockHeight} does not end at the header's merkle root`);
                     }
                     log('link-4 ots', 'pass', `OTS proof ends at the merkle root of block ${chosen.blockHeight}`);
-                    log('link-5 header', 'pass', `header carries real launch-era Bitcoin work (bits 0x${real.bits.toString(16).padStart(8, '0')}, at or under the pinned ceiling; header time ${new Date(real.time * 1000).toISOString()}, set by its miner and kept by Bitcoin within about two hours)`);
+                    log('link-5 header', 'pass', `header carries real launch-era Bitcoin work (bits 0x${real.bits.toString(16).padStart(8, '0')}, at or under the pinned ceiling; header time ${new Date(real.time * 1000).toISOString()}, declared by its miner, no accuracy guarantee)`);
                     anchor = { blockHeight: chosen.blockHeight, blockHashHex: real.blockHashHex, blockTime: new Date(real.time * 1000).toISOString() };
                 }
             }
@@ -1056,7 +1056,7 @@ async function verifyReceiptArtifacts(input, options) {
         // Unreachable by construction; refuse rather than show green.
         return red('R_FIELD_FORMAT', 'internal', 'internal: a link was not proven but no amber was recorded');
     }
-    const residual = ` Proven: the content commitment, binding (${state.link2Rule}), Merkle path and OpenTimestamps proof lead to a header carrying real launch-era Bitcoin work: block ${anchor.blockHashHex} (height ${anchor.blockHeight} as stated by the timestamp proof; the header does not prove its height), block time ${anchor.blockTime} (set by its miner, kept by Bitcoin within about two hours). Not proven offline: that this block is in the main chain — confirm it on the linked explorer. Forging this would need mining a block at real Bitcoin difficulty.`;
+    const residual = ` Proven: the content commitment, binding (${state.link2Rule}), Merkle path and OpenTimestamps proof lead to a header carrying real launch-era Bitcoin work: block ${anchor.blockHashHex} (height ${anchor.blockHeight} as stated by the timestamp proof; the header does not prove its height), block time ${anchor.blockTime} (declared by its miner; Bitcoin bounds it only loosely, so it is approximate). Not proven offline: that this block is in the main chain — confirm it on the linked explorer. Forging this would need mining a block at real Bitcoin difficulty.`;
     return finish(code, SUMMARIES[code] + residual, { ambers: [], provenContent, ...anchorExtra, ...stated });
 }
 
