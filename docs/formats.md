@@ -35,7 +35,7 @@ malformed.
 | `entry.tier` | one of `open`, `sealed`, `tomb`, `treasure`. A legacy receipt (protocol 1 or 2) may omit it; the verifier then reads `[SEALED]` text as `sealed` and anything else as `open` |
 | `entry.id` | a positive integer (JSON number) |
 | `entry.text` | a string containing no NUL (U+0000) |
-| `bitcoin.btc_block` | a positive integer, as a JSON number or a string of decimal digits |
+| `bitcoin.btc_block` | an integer from 1 to 4294967295 (the OTS uint32 range), as a JSON number or a string of decimal digits with no leading zero |
 | `bitcoin.block_header_hex` | exactly 160 characters `[0-9a-f]` (80 bytes) |
 
 A **withheld identity** (`identity.redacted === true` and no
@@ -45,7 +45,11 @@ be checked on it: the result is at best AMBER `A_IDENTITY_WITHHELD`. Link 1
 (when `text` and `hash_text` are present) and links 3 to 5 are still checked,
 and a failure there is red. A **withheld
 `hash_text`** (absent or `null`) is allowed only when the identity is also
-withheld and the tier is `sealed`, `tomb` or `treasure`.
+withheld, the tier is `sealed`, `tomb` or `treasure`, and the content is
+still hidden (`text` is `[SEALED]` or `[TREASURE]`). A receipt that shows its
+text always carries `hash_text`. An `envelope.json` supplied with a receipt
+that withholds `hash_text` cannot be checked, so it is red
+(`R_CONTENT_MISMATCH`).
 
 None of these fields can contain `|` or NUL, so the three-field `|` join of
 B-hash has exactly one split, and no B-hash input contains the NUL that every
@@ -225,7 +229,31 @@ supplied but cannot be checked is red (`R_CONTENT_MISMATCH`): a salt without
 a plaintext, any input on a Treasure (`A-envelope`) receipt, any input on a
 receipt that withholds `hash_text`, a salt on an `A-plain` entry. On a
 receipt that shows its text the input must agree with it: a different
-plaintext or a salt different from `commit_salt` is red.
+plaintext or a salt different from `commit_salt` is red. An `owner` that is
+present but not an object is malformed (`R_FIELD_FORMAT`), and an empty
+`plaintext` or `salt` string is checked like any other value, never ignored.
+
+## The receipt ZIP (`src/verify-zip.js`)
+
+The verifier reports on the bytes it reads from the ZIP, so they must be the
+bytes any other ZIP tool shows. Before any entry is read, the whole layout is
+walked and the ZIP is refused unless:
+
+- one end-of-central-directory record ends the file exactly; no ZIP64,
+  multi-disk, or encrypted entries; stored or deflated only;
+- the central directory holds exactly the records the end record declares,
+  counted from the real headers, at most 20;
+- every entry name is a flat file name (`[A-Za-z0-9_-][A-Za-z0-9._-]*`, no
+  path, no directory, no `.` or `..` segment) and no two names are equal,
+  case ignored;
+- local entries start at byte 0 and follow one another with no gap or
+  overlap (only a data descriptor may sit between them), each with the same
+  name as its central record, ending where the central directory begins;
+- after loading, the ZIP library holds exactly the names walked, none renamed.
+
+Only `receipt.json`, `merkle-root.ots`, `btc-block-header.bin` and
+`envelope.json` are inflated. None may be empty; each must inflate to its
+declared size, at most 25 MB, and 50 MB in all.
 
 ## Outcome codes
 

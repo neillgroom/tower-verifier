@@ -42,7 +42,8 @@ Each row is pinned by vectors in `test-vectors/` (`expected.json` names the outc
 | 7 | Forged block header (easy self-declared bits, early-chain or pre-launch header, bad nonce) | Link 5: pinned minimum height, absolute target ceiling and minimum date, then `sha256d(header)` at or below its own target; a stated `block_hash` must match |
 | 8 | Incomplete receipt shown as proven | Not batched, OTS pending, no OTS or header, identity withheld, Treasure envelope missing: AMBER, never GREEN, and only after every available link has passed |
 | 9 | Hidden carve presented as verified content | A Sealed / Time Capsule receipt showing only `[SEALED]` is labelled "commitment anchored, content hidden" and claims no content; the receipt's `created_at` is never shown as a proven date |
-| 10 | ZIP-bomb DoS | Hard caps: 50 MB compressed, 25 MB per file, 20 entries |
+| 10 | ZIP-bomb DoS | Hard caps: 50 MB compressed, 25 MB per file and 50 MB in all (enforced while inflating), 20 real central records |
+| 10a | ZIP that shows different files to different readers (duplicate or `./`-style names, hidden local entries, trailing data) | `src/verify-zip.js` walks the whole layout before the ZIP library loads it and refuses any ambiguity; the library must then hold exactly the names walked |
 | 11 | Path traversal / XSS via crafted filenames or receipt strings | Filename allowlist + safe-character regex; every receipt string is inserted with `textContent`, never as HTML |
 | 12 | Malicious CDN or exfiltration | All JS vendored or local; CSP `default-src 'none'; script-src 'self'; connect-src 'none'`; the page takes no plaintext, salt or key file |
 | 13 | Compromised SubtleCrypto | Self-test on a known SHA-256 vector; abort on mismatch |

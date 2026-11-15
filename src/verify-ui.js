@@ -11,7 +11,8 @@
 (function () {
     const core = window.TowerVerifyCore;
     const JSZip = window.JSZip;
-    if (!core || !JSZip) {
+    const zipReader = window.TowerVerifyZip;
+    if (!core || !JSZip || !zipReader) {
         document.body.replaceChildren();
         const p = document.createElement('p');
         p.style.cssText = 'color:#ff5555;font-family:monospace;padding:1rem';
@@ -143,127 +144,29 @@
         }
     }
 
-    function renderError(message) {
+    function renderMessage(overall, label, message) {
         const out = $('result');
         out.replaceChildren();
         const light = el('div', 'traffic-light');
         light.appendChild(Object.assign(el('span', 'dot'), { id: 'lightDot' }));
         light.appendChild(Object.assign(el('span', 'label'), { id: 'lightLabel' }));
         out.appendChild(light);
-        renderTrafficLight('red');
+        renderTrafficLight(overall, label);
         out.appendChild(el('p', 'summary', message));
     }
+    const renderError = (message) => renderMessage('red', undefined, message);
+    // Neutral grey while working: a red light is kept for a real refusal.
+    const renderWorking = (message) => renderMessage('working', 'CHECKING', message);
 
-    // Defensive ZIP extraction. Hard caps prevent ZIP-bomb DoS in the
-    // browser. Only the four files the verifier reads are inflated; every
-    // other entry is skipped unread.
-    const MAX_ZIP_BYTES = 50 * 1024 * 1024; //   compressed archive
-    const MAX_FILE_BYTES = 25 * 1024 * 1024; //  one inflated file
-    const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // all inflated files together
-    const MAX_ENTRIES = 20; //                   every record, directories included
-    const ALLOWED_FILES = new Set(['receipt.json', 'merkle-root.ots', 'btc-block-header.bin', 'envelope.json']);
-    const SAFE_NAME = /^[a-zA-Z0-9._-]+$/;
-
-    // Read the record count from the End Of Central Directory before JSZip
-    // builds anything. ZIP64 archives (count 0xffff) are refused: a receipt
-    // never needs one.
-    function centralDirectoryCount(buf) {
-        const b = new Uint8Array(buf);
-        const lowest = Math.max(0, b.length - 22 - 0xffff);
-        for (let i = b.length - 22; i >= lowest; i--) {
-            if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) {
-                const total = b[i + 10] | (b[i + 11] << 8);
-                if (total === 0xffff) throw new Error('ZIP64 archives are not accepted');
-                return total;
-            }
-        }
-        throw new Error('not a ZIP file (no end-of-central-directory record)');
-    }
-
-    // Inflate one entry against a shared byte budget, stopping as soon as
-    // the output passes either the per-file cap or what is left of the
-    // budget for all files.
-    function inflateCapped(entry, name, budget) {
-        return new Promise((resolve, reject) => {
-            const chunks = [];
-            let total = 0;
-            let done = false;
-            const fail = (err) => {
-                if (done) return;
-                done = true;
-                reject(err);
-            };
-            const stream = entry.internalStream('uint8array');
-            stream
-                .on('data', (chunk) => {
-                    if (done) return;
-                    total += chunk.length;
-                    if (total > MAX_FILE_BYTES || total > budget.left) {
-                        stream.pause();
-                        fail(new Error(`${name} inflates past the size cap (${MAX_FILE_BYTES} bytes per file, ${MAX_TOTAL_BYTES} in all)`));
-                        return;
-                    }
-                    chunks.push(chunk);
-                })
-                .on('error', fail)
-                .on('end', () => {
-                    if (done) return;
-                    done = true;
-                    budget.left -= total;
-                    const out = new Uint8Array(total);
-                    let off = 0;
-                    for (const c of chunks) {
-                        out.set(c, off);
-                        off += c.length;
-                    }
-                    resolve(out);
-                })
-                .resume();
-        });
-    }
-
+    // ZIP reading lives in verify-zip.js, shared with the tests, so the
+    // tests exercise the same layout checks and caps the page runs.
     async function extractZip(file) {
-        if (file.size > MAX_ZIP_BYTES) {
-            throw new Error(`ZIP too large (${file.size} bytes; max ${MAX_ZIP_BYTES})`);
+        if (file.size > zipReader.MAX_ZIP_BYTES) {
+            throw new Error(`ZIP too large (${file.size} bytes; max ${zipReader.MAX_ZIP_BYTES})`);
         }
-        const buf = await file.arrayBuffer();
-        const declared = centralDirectoryCount(buf);
-        if (declared > MAX_ENTRIES) {
-            throw new Error(`Too many entries in ZIP (${declared}; max ${MAX_ENTRIES})`);
-        }
-        const zip = await JSZip.loadAsync(buf);
-        const allNames = Object.keys(zip.files);
-        if (allNames.length > MAX_ENTRIES) {
-            throw new Error(`Too many entries in ZIP (${allNames.length}; max ${MAX_ENTRIES})`);
-        }
-
-        // Only safe, allowed, non-directory names go further.
-        const wanted = allNames.filter((n) => !zip.files[n].dir && SAFE_NAME.test(n) && ALLOWED_FILES.has(n));
-
-        // Every file the verifier reads has content, so an empty one is
-        // refused by name. A declared size, when JSZip exposes one, is
-        // checked before inflating; JSZip exposes none for a 0-byte entry.
-        // Either way the inflated size is enforced while streaming below,
-        // because a declared size can lie.
-        for (const name of wanted) {
-            const meta = zip.files[name]._data;
-            const size = meta && typeof meta.uncompressedSize === 'number' ? meta.uncompressedSize : null;
-            if (size === null) continue;
-            if (size === 0) throw new Error(`${name} is empty; a receipt ZIP never carries an empty ${name}`);
-            if (size > MAX_FILE_BYTES) {
-                throw new Error(`${name} declares ${size} bytes uncompressed (cap ${MAX_FILE_BYTES})`);
-            }
-        }
-
-        const budget = { left: MAX_TOTAL_BYTES };
-        const result = {};
-        for (const name of wanted) {
-            // Raw bytes: A-envelope hashes the exact bytes in the ZIP.
-            const bytes = await inflateCapped(zip.files[name], name, budget);
-            if (bytes.length === 0) throw new Error(`${name} is empty; a receipt ZIP never carries an empty ${name}`);
-            result[name] = name === 'receipt.json' ? new TextDecoder().decode(bytes) : bytes;
-        }
-        return result;
+        const files = await zipReader.extractReceiptZip(await file.arrayBuffer(), JSZip);
+        if (files['receipt.json']) files['receipt.json'] = new TextDecoder().decode(files['receipt.json']);
+        return files;
     }
 
     // The page never passes owner input to the core: hidden content is
@@ -282,7 +185,7 @@
     async function handleZipFile(file) {
         const gen = ++generation;
         try {
-            renderError('Extracting…');
+            renderWorking('Reading the ZIP and checking the receipt…');
             const contents = await extractZip(file);
             if (isStale(gen)) return;
             if (!contents['receipt.json']) {

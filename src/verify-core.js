@@ -186,7 +186,8 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const HEX160 = /^[0-9a-f]{160}$/;
 const ISO_MS_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const USER_ID = /^(0|[1-9][0-9]{0,14})$/;
-const BLOCK_HEIGHT = /^[1-9][0-9]{0,8}$/;
+const BLOCK_HEIGHT = /^[1-9][0-9]{0,9}$/;
+const MAX_BLOCK_HEIGHT = 0xffffffff; // OTS stores heights as uint32
 
 // Two manual inserts (entries 58 and 59) whose binding was never recorded.
 // Their leaves are anchored, but no formula reproduces them: amber, never
@@ -277,10 +278,13 @@ function isIsoMsUtc(s) {
     return !Number.isNaN(d.getTime()) && d.toISOString() === s;
 }
 
+// One range for every form a height arrives in: 1 to 2^32-1, the same bound
+// the OTS walker applies to attested heights.
 function parseHeight(v) {
-    if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return v;
-    if (typeof v === 'string' && BLOCK_HEIGHT.test(v)) return Number(v);
-    return NaN;
+    let n = NaN;
+    if (typeof v === 'number' && Number.isSafeInteger(v)) n = v;
+    else if (typeof v === 'string' && BLOCK_HEIGHT.test(v)) n = Number(v);
+    return n >= 1 && n <= MAX_BLOCK_HEIGHT ? n : NaN;
 }
 
 function parseReceipt(receipt, owner, envelopeBytes) {
@@ -367,8 +371,11 @@ function parseReceipt(receipt, owner, envelopeBytes) {
     }
     let hashText = hashes.hash_text;
     if (absent(hashText)) {
-        if (!(identity === null && tier !== 'open')) {
-            return bad('R_FIELD_FORMAT', 'hashes.hash_text is missing; only a public hidden-tier receipt may withhold it');
+        // Only a public receipt whose content is still hidden may withhold
+        // hash_text; once text is shown, link 1 must be checkable.
+        const contentHidden = entry.text === SEALED_MARKER || entry.text === TREASURE_MARKER;
+        if (!(identity === null && tier !== 'open' && contentHidden)) {
+            return bad('R_FIELD_FORMAT', 'hashes.hash_text is missing; only a public receipt whose content is still hidden may withhold it');
         }
         hashText = null;
     } else if (typeof hashText !== 'string' || !HEX64.test(hashText)) {
@@ -426,14 +433,17 @@ function parseReceipt(receipt, owner, envelopeBytes) {
     // Owner-supplied secret (never from the receipt).
     let ownerPlaintext = null;
     let ownerSalt = null;
-    if (owner) {
-        if (!absent(owner.plaintext) && owner.plaintext !== '') {
+    // Owner input that is present in any form is validated and checked:
+    // a non-object, or an empty string, is never silently ignored.
+    if (!absent(owner)) {
+        if (!isObj(owner)) return bad('R_FIELD_FORMAT', 'the owner input is not an object of { plaintext, salt }');
+        if (!absent(owner.plaintext)) {
             if (typeof owner.plaintext !== 'string' || owner.plaintext.includes('\u0000')) {
                 return bad('R_FIELD_FORMAT', 'the supplied plaintext is not text without NUL characters');
             }
             ownerPlaintext = owner.plaintext;
         }
-        if (!absent(owner.salt) && owner.salt !== '') {
+        if (!absent(owner.salt)) {
             if (typeof owner.salt !== 'string' || !HEX64.test(owner.salt)) {
                 return bad('R_FIELD_FORMAT', 'the supplied salt is not 64 lowercase hex characters');
             }
@@ -781,6 +791,13 @@ const SUMMARIES = {
 async function verifyReceiptArtifacts(input, options) {
     const { receipt, otsBytes = null, blockHeaderBytes = null, envelopeBytes = null, owner = null } = input || {};
     const testPolicy = !!(options && options.testHeaderPolicy);
+    if (testPolicy) {
+        // A malformed test policy must never quietly switch the floors off.
+        const p = options.testHeaderPolicy;
+        if (!isObj(p) || !Number.isSafeInteger(p.minHeight) || !Number.isSafeInteger(p.minTime) || typeof p.maxTarget !== 'bigint') {
+            throw new TypeError('testHeaderPolicy must be { minHeight: integer, maxTarget: bigint, minTime: integer }');
+        }
+    }
     const policy = testPolicy ? options.testHeaderPolicy : PINNED_HEADER_POLICY;
     const steps = [];
     const log = (name, status, detail) => steps.push({ name, status, detail });
@@ -848,7 +865,8 @@ async function verifyReceiptArtifacts(input, options) {
             ambers.push('A_TREASURE_NO_ENVELOPE');
             log('link-1 content', 'amber', 'envelope.json not supplied; Treasure content not checked');
         } else if (r.hashText === null) {
-            log('link-1 content', 'skip', 'hash_text withheld on this public receipt; envelope not checked');
+            // Supplied but uncheckable is red, never a silent skip.
+            return red('R_CONTENT_MISMATCH', 'link-1 content', 'envelope.json was supplied, but this receipt withholds hash_text, so the envelope cannot be checked');
         } else {
             state.link1Rule = 'A-envelope';
             const got = await sha256Hex(r.envelopeBytes);
@@ -1042,27 +1060,12 @@ async function verifyReceiptArtifacts(input, options) {
     return finish(code, SUMMARIES[code] + residual, { ambers: [], provenContent, ...anchorExtra, ...stated });
 }
 
-// The owner check applies only to a hidden Sealed / Time Capsule receipt
-// that carries its commitment: text exactly [SEALED], tier sealed or tomb
-// (a legacy receipt without a tier and with [SEALED] text is sealed), and a
-// 64-hex hash_text. Revealed receipts and receipts with hash_text withheld
-// get no owner panel.
-function ownerCheckApplies(receipt) {
-    if (!isObj(receipt) || !isObj(receipt.entry) || !isObj(receipt.hashes)) return false;
-    const e = receipt.entry;
-    if (e.text !== SEALED_MARKER) return false;
-    const tier = absent(e.tier) && receipt.version === LEGACY_RECEIPT_VERSION ? 'sealed' : e.tier;
-    if (tier !== 'sealed' && tier !== 'tomb') return false;
-    return typeof receipt.hashes.hash_text === 'string' && HEX64.test(receipt.hashes.hash_text);
-}
-
 // Exports for browser (script global) and Node (CommonJS) — works in both.
 const api = {
     LEGACY_RECEIPT_VERSION,
     V3_RECEIPT_VERSION,
     OUTCOME_CODES,
     outcomeLabel,
-    ownerCheckApplies,
     MIN_ANCHOR_HEIGHT,
     MAX_TARGET,
     MIN_HEADER_TIME,

@@ -101,6 +101,7 @@ tower-verifier/
 ├── style.css
 ├── src/
 │   ├── verify-core.js      # Crypto, OTS parser, top-level verifier (zero DOM)
+│   ├── verify-zip.js       # Strict receipt-ZIP reader (layout walk, caps), shared with tests
 │   └── verify-ui.js        # DOM rendering, drag-drop
 ├── vendor/
 │   ├── jszip.min.js

@@ -13,15 +13,18 @@
 //   - no genuine production receipt is red;
 //   - the browser self-test failing returns R_SELFTEST.
 //
-// Uses the `unzip` CLI via execFileSync (no shell) as before; no test
-// framework dependency.
+// Every vector ZIP is read through src/verify-zip.js, the same strict reader
+// the page uses; test/zip-attacks.js covers the archive-layout attacks. No
+// test framework dependency.
 
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const os = require('os');
+
 
 const core = require('../src/verify-core');
+const zipReader = require('../src/verify-zip');
+const JSZip = require('../vendor/jszip.min.js');
 
 const VECTOR_DIR = path.join(__dirname, '..', 'test-vectors');
 
@@ -38,18 +41,18 @@ function check(cond, msg) {
     }
 }
 
+// Every vector ZIP goes through the same strict reader the page uses.
 function readZip(zipPath) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-verify-'));
-    try {
-        execFileSync('unzip', ['-o', '-q', zipPath, '-d', tmp], { stdio: 'pipe' });
-        const out = {};
-        for (const name of fs.readdirSync(tmp)) {
-            out[name] = new Uint8Array(fs.readFileSync(path.join(tmp, name)));
-        }
-        return out;
-    } finally {
-        fs.rmSync(tmp, { recursive: true, force: true });
-    }
+    return zipReader.extractReceiptZip(new Uint8Array(fs.readFileSync(zipPath)), JSZip);
+}
+
+// Only for vectors the strict reader refuses: reads every file as-is so the
+// core's own verdict on that input is still asserted.
+async function readZipLenient(zipPath) {
+    const zip = await JSZip.loadAsync(fs.readFileSync(zipPath));
+    const out = {};
+    for (const name of Object.keys(zip.files)) out[name] = await zip.files[name].async('uint8array');
+    return out;
 }
 
 // Same shape the browser UI hands to the core.
@@ -69,7 +72,17 @@ function inputsFromZip(files, owner) {
 const TEST_HEADER_POLICY = { minHeight: 1, maxTarget: (1n << 256n) - 1n, minTime: 0 };
 
 async function runVector(row) {
-    const files = readZip(path.join(VECTOR_DIR, row.name + '.zip'));
+    const zipPath = path.join(VECTOR_DIR, row.name + '.zip');
+    let files;
+    try {
+        files = await readZip(zipPath);
+    } catch (err) {
+        // The page shows a refused ZIP as red, so a refusal may only ever
+        // stand in for a vector that expects red. The core's own answer is
+        // still checked below on the leniently read files.
+        check(row.overall === 'red', `${row.name}: strict ZIP reader refuses it and the vector expects red (${err.message})`);
+        files = await readZipLenient(zipPath);
+    }
     const input = inputsFromZip(files, row.owner);
     const t0 = Date.now();
     const result = row.testPolicy
@@ -135,6 +148,47 @@ async function main() {
         }
     }
 
+    // Core input rules that no vector ZIP carries (b3 P2s 7215dd47f30a,
+    // a44cf7eeddcd). Each starts from a genuine vector and changes one thing.
+    const vin = async (name, mutate, owner) => {
+        const input = inputsFromZip(await readZip(path.join(VECTOR_DIR, name + '.zip')), owner);
+        if (mutate) mutate(input);
+        return core.verifyReceiptArtifacts(input, { testHeaderPolicy: TEST_HEADER_POLICY });
+    };
+    const want = (res, overall, code, label) =>
+        check(res.overall === overall && res.code === code, `${label}: want ${overall}/${code}, got ${res.overall}/${res.code}`);
+    for (const [label, owner] of [
+        ['owner is a string', 'secret'],
+        ['owner is an array', []],
+        ['owner is a number', 7],
+    ]) {
+        want(await vin('v3-sealed-hidden', null, owner), 'red', 'R_FIELD_FORMAT', `hidden sealed + ${label}`);
+        want(await vin('v3-treasure-envelope', null, owner), 'red', 'R_FIELD_FORMAT', `treasure + ${label}`);
+    }
+    want(await vin('v3-sealed-hidden', null, { plaintext: '' }), 'red', 'R_SALT_MISSING', 'hidden salted sealed + empty plaintext is checked, not ignored');
+    want(await vin('legacy-sealed-owner', null, { plaintext: '' }), 'red', 'R_CONTENT_MISMATCH', 'hidden A-plain sealed + empty plaintext is checked, not ignored');
+    want(await vin('v3-sealed-hidden', null, { plaintext: 'x', salt: '' }), 'red', 'R_FIELD_FORMAT', 'hidden sealed + empty salt is checked, not ignored');
+    want(await vin('v3-treasure-envelope', null, { plaintext: '' }), 'red', 'R_CONTENT_MISMATCH', 'treasure + empty plaintext');
+    want(await vin('v3-treasure-envelope', null, { salt: '' }), 'red', 'R_FIELD_FORMAT', 'treasure + empty salt');
+    want(await vin('v3-sealed-revealed', (i) => {
+        i.receipt.identity = { redacted: true };
+        delete i.receipt.hashes.hash_text;
+    }), 'red', 'R_FIELD_FORMAT', 'public revealed sealed receipt may not withhold hash_text');
+    want(await vin('v3-treasure-envelope', (i) => {
+        i.receipt.identity = { redacted: true };
+        delete i.receipt.hashes.hash_text;
+    }), 'red', 'R_CONTENT_MISMATCH', 'envelope.json with a receipt that withholds hash_text is red, not skipped');
+    const noEnv = await vin('v3-treasure-envelope', (i) => {
+        i.receipt.identity = { redacted: true };
+        delete i.receipt.hashes.hash_text;
+        i.envelopeBytes = null;
+    });
+    check(noEnv.overall === 'amber' && (noEnv.ambers || []).includes('A_TREASURE_NO_ENVELOPE'),
+        `public treasure withholding hash_text and no envelope stays amber, envelope unchecked (got ${noEnv.overall}/${noEnv.code} ${JSON.stringify(noEnv.ambers)})`);
+
+    // ZIP layout attacks against the reader the page uses.
+    await require('./zip-attacks')(check);
+
     // Pinned byte layouts: the Python builder and the verifier agree.
     const fv = JSON.parse(fs.readFileSync(path.join(VECTOR_DIR, 'formats-vectors.json'), 'utf8'));
     check(
@@ -177,19 +231,32 @@ async function main() {
     check(st.overall === 'red' && st.code === 'R_SELFTEST', `broken SubtleCrypto -> red/R_SELFTEST (got ${st.overall}/${st.code})`);
     seenCodes.add('R_SELFTEST');
 
-    // Owner panel: only a hidden sealed/tomb receipt that carries hash_text.
-    const H64 = 'a'.repeat(64);
-    const oc = (entry, hashes, version = '1.2') => core.ownerCheckApplies({ version, entry, hashes });
-    check(typeof core.ownerCheckApplies === 'function', 'core exports ownerCheckApplies');
-    if (typeof core.ownerCheckApplies === 'function') {
-        check(oc({ text: '[SEALED]', tier: 'sealed' }, { hash_text: H64 }) === true, 'owner check: hidden sealed with hash_text');
-        check(oc({ text: '[SEALED]', tier: 'tomb' }, { hash_text: H64 }) === true, 'owner check: hidden tomb with hash_text');
-        check(oc({ text: '[SEALED]' }, { hash_text: H64 }) === true, 'owner check: legacy hidden receipt without a tier');
-        check(oc({ text: 'revealed words', tier: 'sealed' }, { hash_text: H64 }) === false, 'owner check: not on a revealed receipt');
-        check(oc({ text: '[SEALED]', tier: 'sealed' }, {}) === false, 'owner check: not when hash_text is withheld');
-        check(oc({ text: '[SEALED]', tier: 'open' }, { hash_text: H64 }) === false, 'owner check: not on an Open receipt');
-        check(oc({ text: '[TREASURE]', tier: 'treasure' }, { hash_text: H64 }) === false, 'owner check: not on Treasure');
-        check(core.ownerCheckApplies(null) === false, 'owner check: not on a missing receipt');
+    // btc_block: one range, 1 to 2^32-1, whether a JSON number or a string
+    // (b3 P3s ba1a9a7d7b5b, 6335439e058f).
+    const withBlock = async (v) => {
+        const input = inputsFromZip(await readZip(path.join(VECTOR_DIR, 'captured-entry-2.zip')));
+        input.receipt.bitcoin.btc_block = v;
+        return core.verifyReceiptArtifacts(input);
+    };
+    for (const v of [4294967296, '4294967296', 0, '0', '01', -5, 1.5, '12345678901']) {
+        const res = await withBlock(v);
+        check(res.code === 'R_FIELD_FORMAT', `btc_block ${JSON.stringify(v)} is out of range or malformed (got ${res.code})`);
+    }
+    for (const v of [4294967295, '4294967295', '1234567890']) {
+        const res = await withBlock(v);
+        check(res.code !== 'R_FIELD_FORMAT' && res.overall === 'red', `btc_block ${JSON.stringify(v)} parses (then fails the anchor, got ${res.overall}/${res.code})`);
+    }
+
+    // A malformed test header policy throws; it never switches the floors off (b3 P3 50978a79b45d).
+    const genuine = inputsFromZip(await readZip(path.join(VECTOR_DIR, 'captured-entry-2.zip')));
+    for (const bad of [true, 1, 'yes', {}, { minHeight: 1, minTime: 0 }, { minHeight: '1', maxTarget: 1n, minTime: 0 }, { minHeight: 1, maxTarget: 1, minTime: 0 }]) {
+        let threw = false;
+        try {
+            await core.verifyReceiptArtifacts(genuine, { testHeaderPolicy: bad });
+        } catch (e) {
+            threw = e instanceof TypeError;
+        }
+        check(threw, `malformed testHeaderPolicy ${typeof bad === 'object' ? JSON.stringify(bad, (k, x) => (typeof x === 'bigint' ? x + 'n' : x)) : JSON.stringify(bad)} throws`);
     }
 
     // Labels: every code has one; only the content-bearing greens say VERIFIED.
