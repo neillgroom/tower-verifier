@@ -87,7 +87,7 @@
             a.href = `https://mempool.space/block/${result.blockHashHex}`;
             a.target = '_blank';
             a.rel = 'noopener noreferrer';
-            a.textContent = `mempool.space → block ${result.blockHashHex.slice(0, 16)}…`;
+            a.textContent = `mempool.space → block ${result.blockHashHex}`;
             link.appendChild(document.createTextNode('Confirm the block is in the Bitcoin main chain: '));
             link.appendChild(a);
             out.appendChild(link);

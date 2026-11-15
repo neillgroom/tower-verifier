@@ -1041,7 +1041,7 @@ async function verifyReceiptArtifacts(input, options) {
         const code = AMBER_PRIORITY.find((c) => ambers.includes(c));
         const others = ambers.filter((c) => c !== code).map((c) => SUMMARIES[c]);
         const anchorLine = anchor
-            ? ` The anchor is proven: the leaf reaches the block ${anchor.blockHashHex.slice(0, 16)}… (height ${anchor.blockHeight} as stated by the timestamp proof), whose header carries real launch-era work.`
+            ? ` The anchor is proven: the leaf reaches the block ${anchor.blockHashHex} (height ${anchor.blockHeight} as stated by the timestamp proof), whose header carries real launch-era work.`
             : ' The Bitcoin anchor was not fully checked.';
         return finish(code, SUMMARIES[code] + (others.length ? ' Also: ' + others.join(' ') : '') + anchorLine, { ambers, ...anchorExtra, ...stated });
     }
@@ -1056,7 +1056,7 @@ async function verifyReceiptArtifacts(input, options) {
         // Unreachable by construction; refuse rather than show green.
         return red('R_FIELD_FORMAT', 'internal', 'internal: a link was not proven but no amber was recorded');
     }
-    const residual = ` Proven: the content commitment, binding (${state.link2Rule}), Merkle path and OpenTimestamps proof lead to a header carrying real launch-era Bitcoin work: block ${anchor.blockHashHex.slice(0, 16)}… (height ${anchor.blockHeight} as stated by the timestamp proof; the header does not prove its height), block time ${anchor.blockTime} (set by its miner, kept by Bitcoin within about two hours). Not proven offline: that this block is in the main chain — confirm it on the linked explorer. Forging this would need mining a block at real Bitcoin difficulty.`;
+    const residual = ` Proven: the content commitment, binding (${state.link2Rule}), Merkle path and OpenTimestamps proof lead to a header carrying real launch-era Bitcoin work: block ${anchor.blockHashHex} (height ${anchor.blockHeight} as stated by the timestamp proof; the header does not prove its height), block time ${anchor.blockTime} (set by its miner, kept by Bitcoin within about two hours). Not proven offline: that this block is in the main chain — confirm it on the linked explorer. Forging this would need mining a block at real Bitcoin difficulty.`;
     return finish(code, SUMMARIES[code] + residual, { ambers: [], provenContent, ...anchorExtra, ...stated });
 }
 
