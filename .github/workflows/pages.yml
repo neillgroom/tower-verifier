@@ -1,5 +1,9 @@
 name: deploy-pages
 
+# The live verifier decides whether a receipt is shown as VERIFIED, so it is
+# never deployed from a commit whose tests fail: `deploy` needs `test`, and
+# both run in this one workflow on the same commit.
+
 on:
   push:
     branches: [main]
@@ -7,15 +11,30 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify vendor provenance
+        run: bash scripts/verify-vendor.sh
+      - name: Run verifier tests
+        run: node test/run.js
+
   deploy:
+    needs: test
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

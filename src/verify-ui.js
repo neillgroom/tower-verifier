@@ -2,11 +2,17 @@
 //
 // Imports verify-core via window.TowerVerifyCore. Uses vendored JSZip
 // via window.JSZip. Both are loaded by index.html.
+//
+// Nothing loaded here leaves the page: the CSP sets connect-src 'none', and
+// this file makes no network call. The page takes no owner input (plaintext,
+// salt or key file); hidden content is checked on The Tower's decrypt page.
+// The only link to it is an ordinary <a href>; nothing is fetched.
 
 (function () {
     const core = window.TowerVerifyCore;
     const JSZip = window.JSZip;
-    if (!core || !JSZip) {
+    const zipReader = window.TowerVerifyZip;
+    if (!core || !JSZip || !zipReader) {
         document.body.replaceChildren();
         const p = document.createElement('p');
         p.style.cssText = 'color:#ff5555;font-family:monospace;padding:1rem';
@@ -17,180 +23,186 @@
     }
 
     const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+    };
 
-    function renderTrafficLight(overall) {
+    const DECRYPT_PAGE = 'https://thetower.one/decrypt.html';
+    // Every ZIP selection takes a new generation; a run that finishes after
+    // a newer one started is discarded, success or error alike.
+    let generation = 0;
+    const isStale = (gen) => gen !== generation;
+
+    // The label text comes from the core (result.label), so the
+    // hidden-commitment green can never be shown as plain "VERIFIED".
+    function renderTrafficLight(overall, text) {
         const colors = { green: '#3cd982', amber: '#d4af37', red: '#ff5555' };
-        const labels = { green: 'VERIFIED', amber: 'PENDING', red: 'FAILED' };
         const dot = $('lightDot');
         const label = $('lightLabel');
         dot.style.background = colors[overall] || '#888';
         dot.style.boxShadow = `0 0 16px ${colors[overall] || '#888'}`;
-        label.textContent = labels[overall] || 'UNKNOWN';
+        label.textContent = text || core.outcomeLabel(overall);
         label.style.color = colors[overall] || '#888';
+    }
+
+    function addRow(box, label, value) {
+        const p = el('p', 'fact');
+        p.appendChild(el('span', 'fact-label', label + ': '));
+        p.appendChild(el('span', 'fact-value', value));
+        box.appendChild(p);
     }
 
     function renderResult(result, receipt) {
         const out = $('result');
         out.replaceChildren();
-        renderTrafficLight(result.overall);
-        const summary = document.createElement('p');
-        summary.className = 'summary';
-        summary.textContent = result.summary;
-        out.appendChild(summary);
+        const light = el('div', 'traffic-light');
+        light.appendChild(Object.assign(el('span', 'dot'), { id: 'lightDot' }));
+        light.appendChild(Object.assign(el('span', 'label'), { id: 'lightLabel' }));
+        out.appendChild(light);
+        renderTrafficLight(result.overall, result.label);
 
-        if (result.overall === 'green') {
-            const link = document.createElement('p');
-            link.className = 'subtle';
+        out.appendChild(el('p', 'summary', result.summary));
+
+        const facts = el('div', 'facts');
+        addRow(facts, 'Outcome', result.code);
+        addRow(facts, 'Content rule (link 1)', result.link1Rule);
+        addRow(facts, 'Binding rule (link 2)', result.link2Rule);
+        if (result.blockTime) {
+            addRow(facts, 'Block time', `${result.blockTime} — the Bitcoin block header's timestamp (declared by its miner; approximate, no accuracy guarantee)`);
+            addRow(facts, 'Block height', `${result.blockHeight} — as stated by the timestamp proof; confirm it on the explorer`);
+        }
+        if (result.statedCreatedAt) {
+            addRow(facts, 'Carve time stated by the receipt', result.blockTime
+                ? `${result.statedCreatedAt} (bound into the leaf; the block time above dates the anchor)`
+                : `${result.statedCreatedAt} (bound into the leaf; the anchor is not yet checked)`);
+        }
+        out.appendChild(facts);
+
+        if (result.blockHashHex) {
+            const link = el('p', 'subtle');
             const a = document.createElement('a');
             a.href = `https://mempool.space/block/${result.blockHashHex}`;
             a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = `mempool.space → block ${result.blockHeight}`;
-            link.appendChild(document.createTextNode('Confirm on a block explorer: '));
+            a.rel = 'noopener noreferrer';
+            a.textContent = `mempool.space → block ${result.blockHashHex}`;
+            link.appendChild(document.createTextNode('Confirm the block is in the Bitcoin main chain: '));
             link.appendChild(a);
             out.appendChild(link);
         }
 
         // Steps detail.
-        const stepsBox = document.createElement('div');
-        stepsBox.className = 'steps';
-        const stepsHeader = document.createElement('h4');
-        stepsHeader.textContent = 'Verification steps';
-        stepsBox.appendChild(stepsHeader);
+        const stepsBox = el('div', 'steps');
+        stepsBox.appendChild(el('h4', null, 'Verification steps'));
         const stepIcons = { pass: '✓', fail: '✗', amber: '⚠', skip: '—' };
         const stepColors = { pass: '#3cd982', fail: '#ff5555', amber: '#d4af37', skip: '#888' };
         for (const step of result.steps) {
-            const row = document.createElement('div');
-            row.className = 'step';
-            const icon = document.createElement('span');
-            icon.className = 'step-icon';
-            icon.textContent = stepIcons[step.status] || '?';
+            const row = el('div', 'step');
+            const icon = el('span', 'step-icon', stepIcons[step.status] || '?');
             icon.style.color = stepColors[step.status] || '#888';
-            const name = document.createElement('span');
-            name.className = 'step-name';
-            name.textContent = step.name;
-            const detail = document.createElement('span');
-            detail.className = 'step-detail';
-            detail.textContent = step.detail;
             row.appendChild(icon);
-            row.appendChild(name);
-            row.appendChild(detail);
+            row.appendChild(el('span', 'step-name', step.name));
+            row.appendChild(el('span', 'step-detail', step.detail));
             stepsBox.appendChild(row);
         }
         out.appendChild(stepsBox);
 
-        // Entry text (read from receipt — single source of truth).
-        if (receipt && receipt.entry && typeof receipt.entry.text === 'string') {
-            const entryBox = document.createElement('div');
-            entryBox.className = 'entry-text';
-            const entryHeader = document.createElement('h4');
-            entryHeader.textContent = `Entry #${receipt.entry.id} — carved ${receipt.entry.created_at}`;
-            entryBox.appendChild(entryHeader);
-            const pre = document.createElement('pre');
-            pre.textContent = receipt.entry.text;
-            entryBox.appendChild(pre);
-            out.appendChild(entryBox);
+        // Content. Only content the verifier proved is presented as proven.
+        // The entry id is shown only when the core validated it as a
+        // positive integer.
+        const entryLabel = Number.isSafeInteger(result.entryId) && result.entryId > 0 ? `Entry #${result.entryId}` : 'Entry';
+        if (result.code === 'G_ENVELOPE') {
+            const box = el('div', 'entry-text');
+            box.appendChild(el('h4', null, `${entryLabel} — Treasure envelope proven`));
+            box.appendChild(el('p', 'subtle', 'The envelope.json in this ZIP is the envelope anchored. Its contents stay sealed; nothing beyond the envelope bytes is claimed.'));
+            out.appendChild(box);
+        } else if (result.overall === 'green' && typeof result.provenContent === 'string') {
+            const box = el('div', 'entry-text');
+            box.appendChild(el('h4', null, `${entryLabel} — proven content`));
+            box.appendChild(el('pre', null, result.provenContent));
+            out.appendChild(box);
+        } else if (result.code === 'G_HIDDEN') {
+            const box = el('div', 'entry-text');
+            box.appendChild(el('h4', null, `${entryLabel} — content hidden`));
+            box.appendChild(el('p', 'subtle', 'No content is shown, so none is claimed.'));
+            const p = el('p', 'subtle', 'The owner can decrypt and check the content with The Tower\'s decrypt page: ');
+            const a = document.createElement('a');
+            a.href = DECRYPT_PAGE;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = DECRYPT_PAGE;
+            p.appendChild(a);
+            box.appendChild(p);
+            out.appendChild(box);
+        } else if (receipt && receipt.entry && typeof receipt.entry.text === 'string'
+            && receipt.entry.text !== core.SEALED_MARKER && receipt.entry.text !== core.TREASURE_MARKER) {
+            const box = el('div', 'entry-text unproven');
+            box.appendChild(el('h4', null, `${entryLabel} — text in the receipt (NOT proven)`));
+            box.appendChild(el('pre', null, receipt.entry.text));
+            out.appendChild(box);
         }
     }
 
-    function renderError(message) {
+    function renderMessage(overall, label, message) {
         const out = $('result');
         out.replaceChildren();
-        renderTrafficLight('red');
-        const p = document.createElement('p');
-        p.className = 'summary';
-        p.textContent = message;
-        out.appendChild(p);
+        const light = el('div', 'traffic-light');
+        light.appendChild(Object.assign(el('span', 'dot'), { id: 'lightDot' }));
+        light.appendChild(Object.assign(el('span', 'label'), { id: 'lightLabel' }));
+        out.appendChild(light);
+        renderTrafficLight(overall, label);
+        out.appendChild(el('p', 'summary', message));
+    }
+    const renderError = (message) => renderMessage('red', undefined, message);
+    // Neutral grey while working: a red light is kept for a real refusal.
+    const renderWorking = (message) => renderMessage('working', 'CHECKING', message);
+
+    // ZIP reading lives in verify-zip.js, shared with the tests, so the
+    // tests exercise the same layout checks and caps the page runs.
+    async function extractZip(file) {
+        if (file.size > zipReader.MAX_ZIP_BYTES) {
+            throw new Error(`ZIP too large (${file.size} bytes; max ${zipReader.MAX_ZIP_BYTES})`);
+        }
+        const files = await zipReader.extractReceiptZip(await file.arrayBuffer(), JSZip);
+        if (files['receipt.json']) files['receipt.json'] = new TextDecoder().decode(files['receipt.json']);
+        return files;
     }
 
-    // Defensive ZIP extraction. Hard caps prevent ZIP-bomb DoS in the
-    // browser. Filename allowlist prevents path-traversal / XSS via
-    // crafted filenames.
-    const MAX_ZIP_BYTES = 50 * 1024 * 1024;
-    const MAX_FILE_BYTES = 25 * 1024 * 1024;
-    const MAX_ENTRIES = 20;
-    const ALLOWED_FILES = new Set([
-        'receipt.json',
-        'merkle-root.ots',
-        'btc-block-header.bin',
-        'ciphertext.bin',
-        'ciphertext-meta.json',
-        'README.txt',
-    ]);
-    const SAFE_NAME = /^[a-zA-Z0-9._-]+$/;
-
-    async function extractZip(file) {
-        if (file.size > MAX_ZIP_BYTES) {
-            throw new Error(`ZIP too large (${file.size} bytes; max ${MAX_ZIP_BYTES})`);
-        }
-        const buf = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(buf);
-        const fileNames = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
-        if (fileNames.length > MAX_ENTRIES) {
-            throw new Error(`Too many files in ZIP (${fileNames.length}; max ${MAX_ENTRIES})`);
-        }
-
-        // Pre-decompression size check via JSZip's internal entry metadata.
-        // We previously checked after `async()` decompressed the entry — too
-        // late to defend against a ZIP bomb (the inflated bytes already in
-        // memory). Now we read the uncompressed-size field from the local
-        // header before any decompression starts. (Audit R2 finding —
-        // Codex P1-6 + CodeRabbit Warning-1.) JSZip 3 exposes this on
-        // `_data.uncompressedSize`; we treat any absence defensively.
-        let totalUncompressed = 0;
-        for (const name of fileNames) {
-            const meta = zip.files[name]?._data;
-            const size = (meta && Number(meta.uncompressedSize)) || 0;
-            if (size > MAX_FILE_BYTES) {
-                throw new Error(`${name} declares ${size} bytes uncompressed (cap ${MAX_FILE_BYTES})`);
-            }
-            totalUncompressed += size;
-        }
-        if (totalUncompressed > MAX_ZIP_BYTES) {
-            throw new Error(`Total uncompressed size ${totalUncompressed} exceeds ${MAX_ZIP_BYTES}`);
-        }
-
-        const result = {};
-        for (const name of fileNames) {
-            if (!SAFE_NAME.test(name)) continue;
-            if (!ALLOWED_FILES.has(name)) continue;
-            const entry = zip.files[name];
-            if (name === 'receipt.json' || name === 'README.txt' || name === 'ciphertext-meta.json') {
-                const text = await entry.async('string');
-                if (new Blob([text]).size > MAX_FILE_BYTES) {
-                    throw new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`);
-                }
-                result[name] = text;
-            } else {
-                const bytes = await entry.async('uint8array');
-                if (bytes.length > MAX_FILE_BYTES) {
-                    throw new Error(`${name} exceeded ${MAX_FILE_BYTES} bytes after decompression`);
-                }
-                result[name] = bytes;
-            }
-        }
-        return result;
+    // The page never passes owner input to the core: hidden content is
+    // checked on The Tower's decrypt page, not here.
+    async function runVerify(receipt, contents, gen) {
+        const result = await core.verifyReceiptArtifacts({
+            receipt,
+            otsBytes: contents['merkle-root.ots'] || null,
+            blockHeaderBytes: contents['btc-block-header.bin'] || null,
+            envelopeBytes: contents['envelope.json'] || null,
+        });
+        if (isStale(gen)) return;
+        renderResult(result, receipt);
     }
 
     async function handleZipFile(file) {
+        const gen = ++generation;
         try {
-            renderError('Extracting…');
+            renderWorking('Reading the ZIP and checking the receipt…');
             const contents = await extractZip(file);
+            if (isStale(gen)) return;
             if (!contents['receipt.json']) {
                 throw new Error('ZIP does not contain receipt.json');
             }
             const receipt = JSON.parse(contents['receipt.json']);
-            const otsBytes = contents['merkle-root.ots'] || null;
-            const blockHeaderBytes = contents['btc-block-header.bin'] || null;
-            const result = await core.verifyReceiptArtifacts({ receipt, otsBytes, blockHeaderBytes });
-            renderResult(result, receipt);
+            await runVerify(receipt, contents, gen);
         } catch (err) {
+            if (isStale(gen)) return;
             console.error(err);
             renderError(`Verification error: ${err.message}`);
         }
     }
 
-    // Drag-and-drop wiring.
+    // ---- wiring -------------------------------------------------------
+
     const drop = $('drop');
     const fileInput = $('fileInput');
     drop.addEventListener('click', () => fileInput.click());

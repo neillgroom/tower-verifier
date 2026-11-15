@@ -31,13 +31,18 @@
 
         <section class="explainer">
             <h2>How this verifier works</h2>
+            <p><strong>Green means every piece of content the receipt shows is tied, link by link, to a Bitcoin block header that carries real work.</strong> The links:</p>
             <ol>
-                <li><strong>SHA-256</strong> the entry text — must match <code>receipt.hashes.hash_text</code>.</li>
-                <li><strong>Walk the Merkle proof</strong> from your hash up to the batch root, using Tower's locked hex-string concatenation convention.</li>
-                <li><strong>Parse the OpenTimestamps proof</strong> inline (no third-party library — the entire OTS format handler is in <code>src/verify-core.js</code>, ~120 lines).</li>
-                <li><strong>Verify the 80-byte Bitcoin block header</strong> bundled in the ZIP — <code>SHA-256d</code> to derive the block hash, check its merkle_root against what the OTS proof walked to.</li>
+                <li><strong>Content to commitment.</strong> The text shown (or the Treasure <code>envelope.json</code>) hashes to <code>hash_text</code>. A hidden Sealed or Time Capsule entry shows no content and claims none; its owner can decrypt and check it on The Tower's decrypt page.</li>
+                <li><strong>Commitment to leaf.</strong> <code>hash_text</code>, the carve timestamp and the carver's identity hash to <code>hash_bound</code>. Only two formats are accepted (<code>B-hash</code> for older carves, <code>B-v3</code> for new ones, which also binds a secret per-carve nonce that only the owner's receipt carries); see <code>docs/formats.md</code>.</li>
+                <li><strong>Leaf to root.</strong> The Merkle path from <code>hash_bound</code> reaches the batch root.</li>
+                <li><strong>Root to header.</strong> The OpenTimestamps proof, parsed inline, ends at the Merkle root inside the bundled 80-byte Bitcoin block header.</li>
+                <li><strong>The header is real.</strong> Its proof of work and timestamp are checked against floors pinned from the real blocks The Tower has anchored: an absolute difficulty ceiling and a minimum date, which the header itself carries. The minimum block height is checked against the height the timestamp proof states; an 80-byte header does not prove its own height.</li>
             </ol>
-            <p>If all steps pass, the entry is anchored to a specific Bitcoin block. No block-explorer call is needed for confirmed entries — the math is self-contained.</p>
+            <p><strong>Amber</strong> means something the receipt shows or implies is not proven. Depending on what is missing, the Bitcoin anchor may or may not have been checked; the result says which (for example: not yet anchored, no timestamp proof bundled, identity withheld on a public receipt, a Treasure envelope not supplied). <strong>Red</strong> means a claim in the receipt is false or malformed. A field that is checked and fails is always red, even when something else is also missing.</p>
+            <p>The block time shown is the timestamp in the Bitcoin block header; its miner declares it, and Bitcoin's rules bound it only loosely, so it is an approximate date, not a proven moment. The carve time written in the receipt is shown only as "stated by the receipt", and only when it is bound into the leaf.</p>
+            <h3>What green does not prove</h3>
+            <p>Offline, the verifier proves the header carries real launch-era Bitcoin work. It cannot prove the block is in the main chain; use the explorer link on a green result for that one-click check. Forging a header that passes would need mining a block at real Bitcoin difficulty.</p>
             <h3>Want to verify offline with a CLI instead?</h3>
             <p>The ZIP's <code>README.txt</code> contains step-by-step instructions for the standard <code>opentimestamps-client</code> CLI. That path works on any air-gapped machine with the OTS client installed.</p>
             <h3>Sourcing</h3>
@@ -45,12 +50,13 @@
         </section>
 
         <footer>
-            <p class="subtle small">▲ Tower Verifier v0.1.0 · MIT · <a href="https://github.com/neillgroom/tower-verifier" target="_blank" rel="noopener">source</a></p>
+            <p class="subtle small">▲ Tower Verifier v0.2.0 · MIT · <a href="https://github.com/neillgroom/tower-verifier" target="_blank" rel="noopener">source</a></p>
         </footer>
     </div>
 
     <script src="vendor/jszip.min.js"></script>
     <script src="src/verify-core.js"></script>
+    <script src="src/verify-zip.js"></script>
     <script src="src/verify-ui.js"></script>
 </body>
 </html>
