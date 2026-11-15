@@ -7,7 +7,7 @@ All notable changes to the Tower Verifier are documented here. Each tagged relea
 Green now means every piece of content the receipt shows is tied, link by link, to a Bitcoin block header that carries real work. Receipt formats: `docs/formats.md`.
 
 ### Changed (verification semantics)
-- Five links, all required for green: content to `hash_text` (`A-plain`, `A-salted`, `A-envelope`, fixed by tier), `hash_text` + timestamp + identity to `hash_bound` (`B-hash` or `B-v3` only), Merkle path, OTS proof to the header's Merkle root, header is real.
+- Five links, all required for green: content to `hash_text` (`A-plain`, `A-salted`, `A-envelope`, fixed by tier), `hash_text` + timestamp + identity (plus, under `B-v3`, the owner-only binding nonce) to `hash_bound` (`B-hash` or `B-v3` only), Merkle path, OTS proof to the header's Merkle root, header is real.
 - Check order: field formats, tier/marker consistency, every link the receipt carries data for (any failure red), and only then amber for missing pieces.
 - Header floors pinned in the verifier (minimum height 940842, absolute target ceiling, minimum date), re-derived from `test-vectors/anchored-headers.json` by `scripts/derive-header-constants.js` in the test run. Previously a header with self-declared easy bits could pass.
 - A stated `btc_block` must match a Bitcoin attestation; a pending-only proof under a stated block is red.

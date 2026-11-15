@@ -972,7 +972,14 @@
   "name": "nonce-identity-swap",
   "overall": "red",
   "code": "R_FIELD_FORMAT",
-  "desc": "nonce and identity swapped between fields",
+  "desc": "nonce and a user-id identity swapped between fields",
+  "testPolicy": true
+ },
+ {
+  "name": "nonce-phone-identity-swap",
+  "overall": "red",
+  "code": "R_BINDING_MISMATCH",
+  "desc": "nonce and a phone-hash identity swapped: both 64 hex, link 2 fails",
   "testPolicy": true
  },
  {
@@ -980,7 +987,16 @@
   "overall": "amber",
   "code": "A_IDENTITY_WITHHELD",
   "desc": "public v3 Open receipt: identity and nonce withheld; link 1 checked, link 2 amber",
-  "testPolicy": true
+  "testPolicy": true,
+  "link1": "A-plain"
+ },
+ {
+  "name": "v3-sealed-revealed-public",
+  "overall": "amber",
+  "code": "A_IDENTITY_WITHHELD",
+  "desc": "public revealed v3 Sealed receipt: salt and text shown, identity and nonce withheld",
+  "testPolicy": true,
+  "link1": "A-salted"
  },
  {
   "name": "nonce-on-public",

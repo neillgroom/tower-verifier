@@ -34,7 +34,7 @@
             <p><strong>Green means every piece of content the receipt shows is tied, link by link, to a Bitcoin block header that carries real work.</strong> The links:</p>
             <ol>
                 <li><strong>Content to commitment.</strong> The text shown (or the Treasure <code>envelope.json</code>) hashes to <code>hash_text</code>. A hidden Sealed or Time Capsule entry shows no content and claims none; its owner can decrypt and check it on The Tower's decrypt page.</li>
-                <li><strong>Commitment to leaf.</strong> <code>hash_text</code>, the carve timestamp and the carver's identity hash to <code>hash_bound</code>. Only two formats are accepted (<code>B-hash</code> for older carves, <code>B-v3</code> for new ones); see <code>docs/formats.md</code>.</li>
+                <li><strong>Commitment to leaf.</strong> <code>hash_text</code>, the carve timestamp and the carver's identity hash to <code>hash_bound</code>. Only two formats are accepted (<code>B-hash</code> for older carves, <code>B-v3</code> for new ones, which also binds a secret per-carve nonce that only the owner's receipt carries); see <code>docs/formats.md</code>.</li>
                 <li><strong>Leaf to root.</strong> The Merkle path from <code>hash_bound</code> reaches the batch root.</li>
                 <li><strong>Root to header.</strong> The OpenTimestamps proof, parsed inline, ends at the Merkle root inside the bundled 80-byte Bitcoin block header.</li>
                 <li><strong>The header is real.</strong> Its proof of work is checked against pinned floors that the receipt cannot choose: a minimum block height, an absolute difficulty ceiling and a minimum date taken from the real blocks The Tower has anchored.</li>

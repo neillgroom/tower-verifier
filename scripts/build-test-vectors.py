@@ -897,14 +897,23 @@ r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
 del r['hashes']['binding_nonce']
 add('nonce-missing-owner', anchored(r), 'red', 'R_FIELD_FORMAT',
     'owner v3 receipt (identity present) without binding_nonce', test_policy=True)
-# Moving the nonce into the identity field, with the identity in the nonce
-# field, is refused by the field formats before anything is hashed.
+# Moving the nonce into the identity field, with a user-id identity in the
+# nonce field, is refused by the field formats before anything is hashed.
 r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
 r['identity']['binding_identity'] = NONCE
 r['identity']['binding_field'] = 'phone_hash'
 r['hashes']['binding_nonce'] = USER_ID
 add('nonce-identity-swap', anchored(r), 'red', 'R_FIELD_FORMAT',
-    'nonce and identity swapped between fields', test_policy=True)
+    'nonce and a user-id identity swapped between fields', test_policy=True)
+# With a phone-hash identity both values are 64 hex, so the formats pass and
+# link 2 must catch the swap.
+SYN_PHONE = sha256_hex(b'synthetic phone hash')
+r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN), identity=SYN_PHONE)
+r['identity']['binding_field'] = 'phone_hash'
+r['identity']['binding_identity'] = NONCE
+r['hashes']['binding_nonce'] = SYN_PHONE
+add('nonce-phone-identity-swap', anchored(r), 'red', 'R_BINDING_MISMATCH',
+    'nonce and a phone-hash identity swapped: both 64 hex, link 2 fails', test_policy=True)
 # Public Open receipt: identity and nonce withheld, text and hash_text shown.
 r = v3_receipt('open', PLAIN, 'A-plain', a_plain(PLAIN))
 f = anchored(r)
@@ -913,7 +922,17 @@ r['identity'] = {'redacted': True, 'note': 'withheld'}
 del r['hashes']['binding_nonce']
 f['receipt.json'] = dump(r)
 add('v3-open-public', f, 'amber', 'A_IDENTITY_WITHHELD',
-    'public v3 Open receipt: identity and nonce withheld; link 1 checked, link 2 amber', test_policy=True)
+    'public v3 Open receipt: identity and nonce withheld; link 1 checked, link 2 amber', test_policy=True,
+    link1='A-plain')
+r = v3_receipt('sealed', SECRET, 'A-salted', SEALED_HT, salt_in_receipt=SALT)
+fr = anchored(r)
+r = json.loads(fr['receipt.json'])
+r['identity'] = {'redacted': True, 'note': 'withheld'}
+del r['hashes']['binding_nonce']
+fr['receipt.json'] = dump(r)
+add('v3-sealed-revealed-public', fr, 'amber', 'A_IDENTITY_WITHHELD',
+    'public revealed v3 Sealed receipt: salt and text shown, identity and nonce withheld', test_policy=True,
+    link1='A-salted')
 # A public receipt must never carry the nonce: red, so a server leak is loud.
 r = json.loads(f['receipt.json'])
 r['hashes']['binding_nonce'] = NONCE

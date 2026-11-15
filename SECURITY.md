@@ -33,7 +33,7 @@ Each row is pinned by vectors in `test-vectors/` (`expected.json` names the outc
 
 | # | Threat | Mitigation |
 |---|--------|------------|
-| 1 | Text swapped over a real anchor | Link 1: the text shown must hash to `hash_text` (`A-plain` / `A-salted`); link 2: `hash_text`, timestamp and identity must hash to `hash_bound`. Either failing is RED |
+| 1 | Text swapped over a real anchor | Link 1: the text shown must hash to `hash_text` (`A-plain` / `A-salted`); link 2: `hash_text`, timestamp and identity (and under `B-v3` the owner-only binding nonce) must hash to `hash_bound`. Either failing is RED |
 | 2 | A tier claim that skips the text check (e.g. "sealed" over visible text, "tomb" over ordinary text) | Tier and marker are checked first; the content rule is fixed by the tier, and a rule stated for the wrong tier is RED |
 | 3 | A leaf the receipt cannot explain (bound over the text, `hash_bound == hash_text`, bound over the literal `[SEALED]`) | Only `B-hash` and `B-v3` are implemented; anything else is RED. Two pinned early entries whose binding was never recorded are AMBER, never green |
 | 4 | Pipe or salt boundary shifts, a hash posing as text | Fields are format-checked before hashing (exact 64-hex, exact millisecond UTC timestamp, hex or decimal identity, no NUL); `B-v3` and `A-salted` inputs are NUL-separated and domain-labelled, so they cannot equal a `B-hash` input |

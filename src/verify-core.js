@@ -103,7 +103,8 @@ async function selfTest() {
 // GREEN means every piece of content the receipt shows is tied, link by
 // link, to a Bitcoin block header that carries real work:
 //   link 1  content          -> hash_text   (A-plain | A-salted | A-envelope)
-//   link 2  hash_text + timestamp + identity -> hash_bound   (B-hash | B-v3)
+//   link 2  hash_text + timestamp + identity -> hash_bound   (B-hash | B-v3;
+//           B-v3 also binds the secret binding nonce, tier and content rule)
 //   link 3  Merkle path      -> merkle_root
 //   link 4  OTS proof        -> header merkle root
 //   link 5  header is real   (pinned height, work and date floors)
