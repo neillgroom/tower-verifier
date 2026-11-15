@@ -64,10 +64,10 @@ function buildZip(files, opts = {}) {
         const size = f.declaredSize !== undefined ? f.declaredSize : data.length;
         const localAt = offset;
         push(Buffer.concat([
-            u32(0x04034b50), u16(20), u16(flags), u16(method), u16(0), u16(0),
-            u32(f.descriptor ? 0 : (f.localCrc !== undefined ? f.localCrc : crc)),
-            u32(f.descriptor ? 0 : (f.localCompressed !== undefined ? f.localCompressed : body.length)),
-            u32(f.descriptor ? 0 : size),
+            u32(0x04034b50), u16(20), u16(f.localFlags !== undefined ? f.localFlags : flags), u16(method), u16(0), u16(0),
+            u32(f.descriptor && !f.localSizesUnderDescriptor ? 0 : (f.localCrc !== undefined ? f.localCrc : crc)),
+            u32(f.descriptor && !f.localSizesUnderDescriptor ? 0 : (f.localCompressed !== undefined ? f.localCompressed : body.length)),
+            u32(f.descriptor && !f.localSizesUnderDescriptor ? 0 : size),
             u16(localName.length), u16(localExtra.length), localName, localExtra,
         ]));
         push(body);
@@ -77,7 +77,7 @@ function buildZip(files, opts = {}) {
         central.push(Buffer.concat([
             u32(0x02014b50), u16(20), u16(20), u16(flags), u16(method), u16(0), u16(0),
             u32(crc), u32(body.length), u32(size),
-            u16(name.length), u16(centralExtra.length), u16(0), u16(0), u16(0), u32(0), u32(localAt), name, centralExtra,
+            u16(name.length), u16(centralExtra.length), u16(0), u16(0), u16(0), u32(f.externalAttr || 0), u32(localAt), name, centralExtra,
         ]));
     });
     if (opts.beforeCd) push(opts.beforeCd);
@@ -138,6 +138,8 @@ module.exports = async function zipAttacks(check) {
         ['a harmless extended-timestamp extra field and a plain comment',
             buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localExtra: extra(0x5455, Buffer.from([1, 0, 0, 0, 0])), centralExtra: extra(0x5455, Buffer.from([1, 0, 0, 0, 0])) }],
                 { comment: Buffer.from('Tower receipt') })],
+        ['Unix regular-file attributes (0100644)', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, externalAttr: (0o100644 << 16) >>> 0 }])],
+        ['data descriptor with the real sizes also in the local header', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, descriptor: 'sig', localSizesUnderDescriptor: true }])],
         ['Treasure kit with extra flat files', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV }, { name: 'reference.js', data: 'x' }, { name: 'spec.md', data: 'x' }, { name: 'README.txt', data: 'x' }])],
     ];
     for (const [label, bytes] of controls) {
@@ -211,6 +213,18 @@ module.exports = async function zipAttacks(check) {
         ['local compressed size differs from the central record', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localCompressed: 5 }])],
         ['local CRC differs from the central record', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localCrc: 1234 }])],
         ['data descriptor CRC differs from the central record', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, descriptor: 'sig', descriptorCrc: 1234 }])],
+        // Cycle-1 board: a signature straddling the comment-length field.
+        // commentLen 0x4b50 is "PK"; a comment starting 05 06 completes
+        // PK 05 06 at eocd+20, which backward-searching readers pick.
+        ['end-record signature straddling the comment-length field',
+            buildZip([...base(), env('envelope.json', GENUINE_ENV)], { comment: Buffer.concat([Buffer.from([5, 6]), Buffer.alloc(0x4b50 - 2)]) })],
+        ['entry marked as a Unix symlink', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, externalAttr: (0o120777 << 16) >>> 0 }])],
+        ['entry marked as a Unix directory', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, externalAttr: (0o040755 << 16) >>> 0 }])],
+        ['entry marked as a DOS directory', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, externalAttr: 0x10 }])],
+        ['unsupported flag bit (patched data, bit 5)', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, flags: 0x0020 }])],
+        ['local flags differ from central flags', buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, localFlags: 0x0800 }])],
+        ['data descriptor entry whose local sizes are nonzero and wrong',
+            buildZip([...base(), { name: 'envelope.json', data: GENUINE_ENV, descriptor: 'sig', localSizesUnderDescriptor: true, localCompressed: 3 }])],
         ['trailing-dot name that Windows maps onto envelope.json', buildZip([...base(), env('envelope.json.'), env('envelope.json', GENUINE_ENV)])],
         ['local header name length runs past the file', (() => {
             const z = buildZip(base());

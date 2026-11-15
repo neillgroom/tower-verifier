@@ -39,6 +39,10 @@
     const SIG_CENTRAL = 0x02014b50;
     const SIG_EOCD = 0x06054b50;
     const SIG_ZIP64_LOCATOR = 0x07064b50;
+    const SIG_ZIP64_EOCD = 0x06064b50;
+    // General-purpose flag bits a receipt ZIP may use: deflate options
+    // (bits 1-2), data descriptor (bit 3), UTF-8 names (bit 11).
+    const ALLOWED_FLAGS = 0x0002 | 0x0004 | 0x0008 | 0x0800;
     const SIG_DESCRIPTOR = 0x08074b50;
 
     function fail(msg) {
@@ -92,7 +96,7 @@
         }
     }
 
-    // Walk the archive. Returns [{ name, flags, method, compressedSize,
+    // Walk the archive. Returns [{ name, crc, compressedSize,
     // uncompressedSize }] in central-directory order, or throws.
     function scanZip(input) {
         const b = input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -111,10 +115,19 @@
         }
         if (eocd === -1) fail('not a ZIP file (no end-of-central-directory record at the end)');
         // Readers that search backward for the last end record (JSZip, unzip)
-        // must land on this one: the comment may hold no ZIP signature at all,
-        // so a second archive cannot hide in it.
+        // must land on this one. So no record signature may start anywhere
+        // after its own four signature bytes (one could straddle the
+        // comment-length field and the comment), and the comment may hold no
+        // "PK" pair at all. The second rule is deliberately stricter: plain
+        // text "PK" in a comment is refused too.
+        for (let k = eocd + 1; k + 4 <= b.length; k++) {
+            const s = u32(b, k);
+            if (s === SIG_EOCD || s === SIG_CENTRAL || s === SIG_LOCAL || s === SIG_ZIP64_LOCATOR || s === SIG_ZIP64_EOCD) {
+                fail('a ZIP record signature appears after the end record');
+            }
+        }
         for (let k = eocd + 22; k + 1 < b.length; k++) {
-            if (b[k] === 0x50 && b[k + 1] === 0x4b) fail('the ZIP comment contains a ZIP signature');
+            if (b[k] === 0x50 && b[k + 1] === 0x4b) fail('the ZIP comment contains "PK", which could hide a second archive');
         }
 
         const disk = u16(b, eocd + 4);
@@ -149,9 +162,15 @@
             const extraLen = u16(b, p + 30);
             const commentLen = u16(b, p + 32);
             const diskStart = u16(b, p + 34);
+            const externalAttr = u32(b, p + 38);
             const localOffset = u32(b, p + 42);
             need(b, p + 46, nameLen + extraLen + commentLen, 'central record');
             if (flags & 0x0001) fail('encrypted entries are not accepted');
+            if (flags & ~ALLOWED_FLAGS) fail('an entry uses ZIP flags a receipt never needs');
+            const unixType = (externalAttr >>> 16) & 0xf000;
+            if ((externalAttr & 0x18) !== 0 || (unixType !== 0 && unixType !== 0x8000)) {
+                fail('an entry is marked as a directory, link or other non-file');
+            }
             if (method !== 0 && method !== 8) fail('only stored or deflated entries are accepted');
             if (diskStart !== 0) fail('multi-disk archives are not accepted');
             if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
@@ -202,7 +221,7 @@
             if (lNameLen !== e.nameLen || !sameBytes(b, e.localOffset + 30, e.cdNameAt, e.nameLen)) {
                 fail(`local and central names disagree on "${e.name}"`);
             }
-            if ((lFlags & 0x0008) !== (e.flags & 0x0008)) fail(`local and central records disagree on "${e.name}"`);
+            if (lFlags !== e.flags) fail(`local and central flags disagree on "${e.name}"`);
             checkExtra(b, e.localOffset + 30 + lNameLen, lExtraLen, e.name, 'local');
             // A streaming reader trusts the local header (or the data
             // descriptor), not the central record: they must agree.
@@ -221,6 +240,13 @@
                 const d = gap === 16 ? end + 4 : end;
                 if (!same(u32(b, d), u32(b, d + 4), u32(b, d + 8))) {
                     fail(`the data descriptor of "${e.name}" disagrees with its central record`);
+                }
+                // A reader that ignores bit 3 reads the local header's sizes.
+                const lc = u32(b, e.localOffset + 14);
+                const lcs = u32(b, e.localOffset + 18);
+                const lus = u32(b, e.localOffset + 22);
+                if (!((lc === 0 && lcs === 0 && lus === 0) || same(lc, lcs, lus))) {
+                    fail(`local sizes of "${e.name}" are neither zero nor its central record`);
                 }
                 end = next;
             } else if (!same(u32(b, e.localOffset + 14), u32(b, e.localOffset + 18), u32(b, e.localOffset + 22))) {

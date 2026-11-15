@@ -77,7 +77,7 @@
         if (result.statedCreatedAt) {
             addRow(facts, 'Carve time stated by the receipt', result.blockTime
                 ? `${result.statedCreatedAt} (bound into the leaf; the block time above dates the anchor)`
-                : `${result.statedCreatedAt} (bound into the leaf; the anchor date is not yet proven)`);
+                : `${result.statedCreatedAt} (bound into the leaf; the anchor is not yet checked)`);
         }
         out.appendChild(facts);
 

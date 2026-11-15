@@ -36,7 +36,7 @@ cd tower-verifier
 3. **Link 2, commitment to leaf.** `hash_text`, the timestamp and the identity hash to `hash_bound`, by exactly one of two formats: `B-hash` (every carve before protocol 3) or `B-v3` (domain-separated, from protocol 3). Nothing else is accepted.
 4. **Link 3, leaf to root.** The Merkle path from `hash_bound` reaches `merkle_root` (Tower's hex-string concatenation convention).
 5. **Link 4, root to header.** The OpenTimestamps proof, parsed inline with bounded size and operation count, ends at the Merkle root inside the bundled 80-byte header, at the height the receipt states.
-6. **Link 5, the header is real.** Pinned minimum height (940842, Tower's first anchored block), pinned absolute difficulty ceiling, pinned minimum date, and `sha256d(header)` below its own target. None of these depend on a value the receipt chooses.
+6. **Link 5, the header is real.** Pinned absolute difficulty ceiling, pinned minimum date, and `sha256d(header)` below its own target, all read from the header itself. The pinned minimum height (940842, Tower's first anchored block) is checked against the height the OpenTimestamps proof states; the header does not prove its own height.
 
 Any check that runs and fails is **RED**, even if something else is also missing. Only after every available link has passed may a missing piece make the result **AMBER**.
 

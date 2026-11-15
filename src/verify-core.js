@@ -1028,7 +1028,7 @@ async function verifyReceiptArtifacts(input, options) {
                         return red('R_OTS', 'link-4 ots', `the OTS proof for block ${chosen.blockHeight} does not end at the header's merkle root`);
                     }
                     log('link-4 ots', 'pass', `OTS proof ends at the merkle root of block ${chosen.blockHeight}`);
-                    log('link-5 header', 'pass', `header carries real launch-era Bitcoin work (bits 0x${real.bits.toString(16).padStart(8, '0')}, at or under the pinned ceiling; dated ${new Date(real.time * 1000).toISOString()})`);
+                    log('link-5 header', 'pass', `header carries real launch-era Bitcoin work (bits 0x${real.bits.toString(16).padStart(8, '0')}, at or under the pinned ceiling; header time ${new Date(real.time * 1000).toISOString()}, set by its miner and kept by Bitcoin within about two hours)`);
                     anchor = { blockHeight: chosen.blockHeight, blockHashHex: real.blockHashHex, blockTime: new Date(real.time * 1000).toISOString() };
                 }
             }
